@@ -1,0 +1,202 @@
+// ============================================================
+// Bootstrap: pull token + transaction details from URL query string.
+// All txn context (cardholder name, vendor, amount, date) is encoded
+// in the link the cardholder clicked. No API lookup needed.
+//
+// On submit: POST multipart/form-data to /api/submit. The Netlify
+// Function packages it into an email + attachments and sends it to
+// cc@iicorp.org. The Invoice App scans that folder for incoming
+// submissions.
+// ============================================================
+
+const $ = id => document.getElementById(id);
+
+function paramsFromUrl() {
+  const q = new URLSearchParams(location.search);
+  return {
+    token:      (q.get("token") || "").trim(),
+    cardholder: (q.get("cardholder") || "").trim(),
+    vendor:     (q.get("vendor") || "").trim(),
+    amount:     (q.get("amount") || "").trim(),
+    date:       (q.get("date") || "").trim(),
+    card_last4: (q.get("card") || "").trim(),
+  };
+}
+
+function show(id) {
+  ["loadingCard", "notFoundCard", "resolvedCard", "cardWrap"]
+    .forEach(x => $(x) && $(x).classList.add("hidden"));
+  const el = $(id);
+  if (el) el.classList.remove("hidden");
+}
+
+let CTX = paramsFromUrl();
+let queue = [];   // staged files for upload
+
+function isValidToken(t) { return /^[A-Za-z0-9_-]{8,64}$/.test(t || ""); }
+
+function boot() {
+  if (!isValidToken(CTX.token)) { show("notFoundCard"); return; }
+  renderForm();
+}
+
+function renderForm() {
+  $("userName").textContent      = CTX.cardholder || "Cardholder";
+  $("txnAmount").textContent     = CTX.amount ? formatAmount(CTX.amount) : "—";
+  $("txnVendor").textContent     = CTX.vendor   || "Unknown vendor";
+  $("txnDate").textContent       = CTX.date     || "—";
+  $("txnCard").textContent       = CTX.card_last4 || "----";
+
+  const existing = $("existingBox");
+  if (existing) existing.classList.add("hidden");
+
+  document.querySelectorAll("[data-req-for]").forEach(el => {
+    const req = el.getAttribute("data-req-for");
+    el.textContent = (req === "photo") ? "*" : "";
+  });
+
+  wireFileInputs();
+  $("form").addEventListener("submit", handleSubmit);
+
+  const fraudBtn = $("openFraud");
+  if (fraudBtn) fraudBtn.addEventListener("click", openFraudMode);
+
+  show("cardWrap");
+}
+
+function formatAmount(s) {
+  const n = parseFloat(String(s).replace(/[^0-9.\-]/g, ""));
+  if (isNaN(n)) return s;
+  return "$" + n.toFixed(2);
+}
+
+function wireFileInputs() {
+  const onPick = ev => {
+    const files = Array.from(ev.target.files || []);
+    for (const f of files) {
+      if (f.size > 25 * 1024 * 1024) {
+        alert(`"${f.name}" is too large (max 25MB).`);
+        continue;
+      }
+      queue.push(f);
+    }
+    ev.target.value = "";
+    renderThumbs();
+  };
+  $("cameraInput").addEventListener("change", onPick);
+  $("uploadInput").addEventListener("change", onPick);
+}
+
+function renderThumbs() {
+  const row = $("thumbRow");
+  row.innerHTML = "";
+  queue.forEach((f, i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "thumb";
+    if (f.type.startsWith("image/")) {
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(f);
+      wrap.appendChild(img);
+    } else {
+      const lbl = document.createElement("div");
+      lbl.className = "thumb-doc";
+      lbl.textContent = f.name.length > 18 ? f.name.slice(0, 16) + "…" : f.name;
+      wrap.appendChild(lbl);
+    }
+    const x = document.createElement("button");
+    x.className = "thumb-x";
+    x.type = "button";
+    x.textContent = "×";
+    x.addEventListener("click", () => { queue.splice(i, 1); renderThumbs(); });
+    wrap.appendChild(x);
+    row.appendChild(wrap);
+  });
+}
+
+async function handleSubmit(e) {
+  e.preventDefault();
+  if (queue.length === 0) {
+    alert("Please attach at least one receipt photo or PDF.");
+    return;
+  }
+  const btn = $("submitBtn");
+  btn.disabled = true;
+  btn.textContent = "Submitting…";
+
+  const fd = new FormData();
+  fd.append("token", CTX.token);
+  fd.append("cardholder", CTX.cardholder);
+  fd.append("vendor", CTX.vendor);
+  fd.append("amount", CTX.amount);
+  fd.append("date", CTX.date);
+  fd.append("store", $("storeInput").value || "");
+  fd.append("description", $("descInput").value || "");
+  for (const f of queue) fd.append("receipts", f, f.name);
+
+  try {
+    const r = await fetch("/api/submit", { method: "POST", body: fd });
+    if (!r.ok) {
+      let msg = "Submission failed.";
+      try { const j = await r.json(); if (j.error) msg = j.error; } catch (e) {}
+      alert(msg);
+      btn.disabled = false;
+      btn.textContent = "Submit receipt";
+      return;
+    }
+  } catch (err) {
+    alert("Network error: " + err.message);
+    btn.disabled = false;
+    btn.textContent = "Submit receipt";
+    return;
+  }
+  showSuccess();
+}
+
+function showSuccess() {
+  const card = $("cardWrap");
+  card.innerHTML = `
+    <div class="rsvd-check">✓</div>
+    <h1 class="rsvd-title">Receipt submitted</h1>
+    <div class="rsvd-sub">Thanks. You're all set.</div>
+    <div class="rsvd-meta">
+      <div class="rsvd-row"><span>Vendor</span><span>${escHtml(CTX.vendor || "")}</span></div>
+      <div class="rsvd-row"><span>Amount</span><span>${escHtml(formatAmount(CTX.amount || ""))}</span></div>
+      <div class="rsvd-row"><span>Charge date</span><span>${escHtml(CTX.date || "")}</span></div>
+    </div>
+    <a class="rsvd-btn rsvd-btn-secondary" href="${location.pathname}${location.search}">Add more receipts</a>
+    <div class="rsvd-footer">iicorp.org</div>
+  `;
+}
+
+function escHtml(s) {
+  return String(s || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function openFraudMode() {
+  const note = prompt("If you didn't make this charge, briefly describe what happened (optional):");
+  if (note === null) return;
+  fetch("/api/submit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: CTX.token, cardholder: CTX.cardholder, vendor: CTX.vendor,
+      amount: CTX.amount, date: CTX.date, fraud: true, note: note || "",
+    }),
+  }).then(r => {
+    if (r.ok) {
+      const card = $("cardWrap");
+      card.innerHTML = `
+        <div class="rsvd-check">⚠</div>
+        <h1 class="rsvd-title">Fraud report sent</h1>
+        <div class="rsvd-sub">Thanks. Accounts payable will follow up.</div>
+        <div class="rsvd-footer">iicorp.org</div>
+      `;
+    } else {
+      alert("Couldn't send report. Please try again or email accounts payable directly.");
+    }
+  });
+}
+
+boot();
