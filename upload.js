@@ -34,14 +34,29 @@
   }
 
   // ─── Update-mode detection ─────────────────────────────────────────
-  // localStorage flag is per-device. Falls back to ?u=1 if the backend
-  // ever embeds an update flag in reminder URLs (cross-device support).
+  // localStorage flags are per-device.
+  //  cc_submitted_<token>   → previous successful receipt submission
+  //  cc_fraud_<token>       → previous fraud report; form locks down
+  //  ?u=1                   → backend-controlled update-mode override
   const SUBMITTED_KEY = `cc_submitted_${token}`;
-  let isUpdateMode = false;
+  const FRAUD_KEY     = `cc_fraud_${token}`;
+  let isUpdateMode  = false;
+  let isFraudLocked = false;
   try {
+    if (localStorage.getItem(FRAUD_KEY)) isFraudLocked = true;
     if (params.get("u") === "1") isUpdateMode = true;
     else if (localStorage.getItem(SUBMITTED_KEY)) isUpdateMode = true;
   } catch (_) { /* localStorage blocked — stay in first-time mode */ }
+
+  // Fraud lock short-circuits everything: show a locked-out screen and
+  // never render the form. The cardholder has to contact accounting to
+  // get the link unlocked (admin clicks Unmark Fraud in the dashboard).
+  if (isFraudLocked) {
+    showError("Reported as fraud",
+      "This charge was reported as fraudulent. If that was a mistake, "
+      + "contact your accounting admin to unlock the link.");
+    return;
+  }
 
   $("m-cardholder").textContent = cardholder || "—";
   $("m-vendor").textContent     = vendor || "—";
@@ -182,6 +197,11 @@
         disableForm(false);
         return;
       }
+      // v2_120-fix10: set the fraud-lock flag so subsequent visits to
+      // the same link on this device hit the locked-out screen
+      // immediately. Per-device only; admin's Unmark Fraud doesn't
+      // unset this flag (different machine anyway).
+      try { localStorage.setItem(FRAUD_KEY, new Date().toISOString()); } catch (_) {}
       showDone("Report received", "Thanks. The accounting team has been notified.");
     } catch (err) {
       setStatus(`Network error: ${err.message || err}`, "error");
