@@ -27,6 +27,71 @@
 
   const TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
+  // Where the store-dropdown options come from (managed in the Invoice App under
+  // Settings -> Credit Cards -> Submissions). Overridable so a test page can point
+  // it at a stub. THE RULE THIS CODE LIVES BY: this form must never go down - so
+  // every failure path here leaves the plain text input exactly as it was.
+  const OPTIONS_URL = window.CC_OPTIONS_URL
+    || "https://iicorp-ip.vercel.app/api/cc-form-options";
+  const REQUIRED = { store: false, description: false };
+
+  function markRequired(fieldId) {
+    const label = document.querySelector('label[for="' + fieldId + '"]');
+    if (!label) return;
+    const opt = label.querySelector(".opt");
+    if (opt) opt.textContent = "(required)";
+  }
+
+  async function upgradeStoreField() {
+    let cfg = null;
+    try {
+      const ctl = new AbortController();
+      const tm = setTimeout(() => ctl.abort(), 4500);
+      const res = await fetch(OPTIONS_URL, { signal: ctl.signal });
+      clearTimeout(tm);
+      cfg = await res.json();
+    } catch (_) { return; }                    // unreachable/slow: stay plain
+    if (!cfg || cfg.ok !== true) return;
+    if (cfg.require_description) { REQUIRED.description = true; markRequired("description"); }
+    if (cfg.require_store) { REQUIRED.store = true; markRequired("store"); }
+    const options = Array.isArray(cfg.options) ? cfg.options : [];
+    if (!options.length) return;               // nothing configured: stay plain
+    const input = $("store");
+    if (!input || input.tagName === "SELECT") return;
+    const sel = document.createElement("select");
+    sel.id = "store"; sel.name = "store";
+    sel.className = input.className || "";
+    const first = document.createElement("option");
+    first.value = ""; first.textContent = "Choose…";
+    sel.appendChild(first);
+    options.forEach((o) => {
+      if (!o || !o.label) return;
+      const op = document.createElement("option");
+      op.value = o.label;                      // the human-readable store field
+      op.dataset.code = o.code || "";
+      op.dataset.kind = o.kind || "store";
+      op.textContent = o.label;
+      sel.appendChild(op);
+    });
+    // an update visit may carry a previously typed free-text store - keep it pickable
+    const prev = (input.value || "").trim();
+    if (prev && !Array.prototype.some.call(sel.options, (op) => op.value === prev)) {
+      const op = document.createElement("option");
+      op.value = prev; op.textContent = prev + " (as typed before)";
+      sel.appendChild(op);
+      sel.value = prev;
+    }
+    input.replaceWith(sel);
+    if (cfg.store_hint) {
+      const hint = document.createElement("div");
+      hint.className = "opt";
+      hint.style.marginTop = "4px";
+      hint.textContent = cfg.store_hint;
+      sel.insertAdjacentElement("afterend", hint);
+    }
+  }
+  upgradeStoreField();
+
   if (!TOKEN_RE.test(token)) {
     showError("Link expired or not found",
       "This receipt link is missing required information. Please use the link from your reminder email.");
@@ -141,6 +206,22 @@
     }
     const store       = $("store").value.trim();
     const description = $("description").value.trim();
+    if (REQUIRED.store && !store) {
+      setStatus("Please choose which store (or company) this charge is for.", "error");
+      return;
+    }
+    if (REQUIRED.description && !description) {
+      setStatus("Please add a short description - accounting needs it to book the charge.", "error");
+      return;
+    }
+    // what the chosen option is LINKED TO: a specific store, or a whole company
+    // (split across its open locations). Rides in the email for the QB export work.
+    let storeCode = "", storeKind = "";
+    const sEl = $("store");
+    if (sEl && sEl.tagName === "SELECT" && sEl.selectedIndex > -1) {
+      const op = sEl.options[sEl.selectedIndex];
+      if (op && op.dataset) { storeCode = op.dataset.code || ""; storeKind = op.dataset.kind || ""; }
+    }
 
     const fd = new FormData();
     fd.append("token", token);
@@ -149,6 +230,8 @@
     fd.append("amount", amount);
     fd.append("date", date);
     fd.append("store", store);
+    fd.append("store_code", storeCode);
+    fd.append("store_kind", storeKind);
     fd.append("description", description);
     files.forEach((f) => fd.append("files", f, f.name));
 

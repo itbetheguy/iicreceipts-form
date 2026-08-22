@@ -78,6 +78,8 @@ module.exports = async function handler(req, res) {
       amount:      f.amount      || "",
       date:        f.date        || "",
       store:       f.store       || "",
+      store_code:  f.store_code  || "",
+      store_kind:  f.store_kind  || "",
       description: f.description || "",
       submitted_at: new Date().toISOString(),
       file_count:  files.length,
