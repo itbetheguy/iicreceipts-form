@@ -92,7 +92,10 @@
       sel.insertAdjacentElement("afterend", hint);
     }
   }
-  upgradeStoreField();
+  // Sequenced on purpose: the dropdown must exist (or have declined to) BEFORE
+  // the remembered store is prefolded, or the prefill silently no-ops against a
+  // SELECT that has no matching option.
+  upgradeStoreField().then(showPreviousSubmissions);
 
   // THE LINK REMEMBERS. Each link shows what has already been submitted for its
   // charge - so "did my first one go through?" is answered on the page instead of
@@ -130,14 +133,22 @@
     isUpdateMode = true;
     if (st.store) {
       const sEl = $("store");
-      if (sEl && !sEl.value) sEl.value = st.store;
+      if (sEl && !sEl.value) {
+        if (sEl.tagName === "SELECT"
+            && !Array.prototype.some.call(sEl.options, (op) => op.value === st.store)) {
+          const op = document.createElement("option");
+          op.value = st.store; op.textContent = st.store + " (as submitted before)";
+          sEl.appendChild(op);
+        }
+        sEl.value = st.store;
+      }
     }
     if (st.description) {
       const dEl = $("description");
       if (dEl && !dEl.value) dEl.value = st.description;
     }
   }
-  showPreviousSubmissions();
+
 
   if (!TOKEN_RE.test(token)) {
     showError("Link expired or not found",
