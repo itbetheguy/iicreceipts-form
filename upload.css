@@ -291,3 +291,32 @@ button:disabled {
   max-width: 360px;
   margin: 0 auto;
 }
+
+/* Distinct, meaningful colors for the three actions (owner's request):
+   submit = green (go), temporary = yellow (caution), not-mine = red (stop). */
+#submit-btn.primary {
+  background: var(--success);
+  color: #06140d;
+}
+#submit-btn.primary:hover:not(:disabled) {
+  background: #4fce8a;
+}
+#temp-btn.secondary {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+#temp-btn.secondary:hover:not(:disabled) {
+  color: #0d0d0d;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+#fraud-btn.secondary {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+#fraud-btn.secondary:hover:not(:disabled) {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
