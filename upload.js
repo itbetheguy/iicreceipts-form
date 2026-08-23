@@ -64,37 +64,29 @@
     const options = Array.isArray(cfg.options) ? cfg.options : [];
     if (!options.length) return;               // nothing configured: stay plain
     const input = $("store");
-    if (!input || input.tagName === "SELECT") return;
-    const sel = document.createElement("select");
-    sel.id = "store"; sel.name = "store";
-    sel.className = input.className || "";
-    const first = document.createElement("option");
-    first.value = ""; first.textContent = "Choose…";
-    sel.appendChild(first);
+    if (!input || input.tagName !== "INPUT") return;
+    /* cloud271 - a TYPABLE dropdown: keep the text box and attach a datalist so the
+       cardholder can PICK a configured store OR TYPE their own if they don't know it.
+       Options are stashed so submit can look the store number (code) + kind back up
+       by the chosen label. */
+    window.__STORE_OPTS = options.slice();
+    const dl = document.createElement("datalist");
+    dl.id = "store-options";
     options.forEach((o) => {
       if (!o || !o.label) return;
       const op = document.createElement("option");
-      op.value = o.label;                      // the human-readable store field
-      op.dataset.code = o.code || "";
-      op.dataset.kind = o.kind || "store";
-      op.textContent = o.label;
-      sel.appendChild(op);
+      op.value = o.label;                      // the human-readable "store# - company"
+      dl.appendChild(op);
     });
-    // an update visit may carry a previously typed free-text store - keep it pickable
-    const prev = (input.value || "").trim();
-    if (prev && !Array.prototype.some.call(sel.options, (op) => op.value === prev)) {
-      const op = document.createElement("option");
-      op.value = prev; op.textContent = prev + " (as typed before)";
-      sel.appendChild(op);
-      sel.value = prev;
-    }
-    input.replaceWith(sel);
+    input.setAttribute("list", "store-options");
+    if (!input.placeholder) input.placeholder = "Type or pick a store…";
+    (input.parentNode || document.body).appendChild(dl);
     if (cfg.store_hint) {
       const hint = document.createElement("div");
       hint.className = "opt";
       hint.style.marginTop = "4px";
       hint.textContent = cfg.store_hint;
-      sel.insertAdjacentElement("afterend", hint);
+      input.insertAdjacentElement("afterend", hint);
     }
   }
   // Sequenced on purpose: the dropdown must exist (or have declined to) BEFORE
@@ -298,8 +290,14 @@
     // what the chosen option is LINKED TO: a specific store, or a whole company
     // (split across its open locations). Rides in the email for the QB export work.
     let storeCode = "", storeKind = "";
+    /* cloud271 - match the typed/picked value back to a configured option to get its
+       store number (code) + kind; a freely-typed store simply has no code, which is
+       fine (the admin can set it later). */
+    const _opts = window.__STORE_OPTS || [];
+    const _match = _opts.find((o) => o && o.label === store);
+    if (_match) { storeCode = _match.code || ""; storeKind = _match.kind || ""; }
     const sEl = $("store");
-    if (sEl && sEl.tagName === "SELECT" && sEl.selectedIndex > -1) {
+    if (!_match && sEl && sEl.tagName === "SELECT" && sEl.selectedIndex > -1) {
       const op = sEl.options[sEl.selectedIndex];
       if (op && op.dataset) { storeCode = op.dataset.code || ""; storeKind = op.dataset.kind || ""; }
     }
