@@ -58,6 +58,9 @@
     if (!cfg || cfg.ok !== true) return;
     if (cfg.require_description) { REQUIRED.description = true; markRequired("description"); }
     if (cfg.require_store) { REQUIRED.store = true; markRequired("store"); }
+    // cloud252 - if the admin set the Store field to free text, keep the plain box
+    // even when options exist
+    if (cfg.store_field_type === "free") return;
     const options = Array.isArray(cfg.options) ? cfg.options : [];
     if (!options.length) return;               // nothing configured: stay plain
     const input = $("store");
