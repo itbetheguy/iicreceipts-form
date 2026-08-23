@@ -33,6 +33,8 @@
   // every failure path here leaves the plain text input exactly as it was.
   const OPTIONS_URL = window.CC_OPTIONS_URL
     || "https://iicorp-ip.vercel.app/api/cc-form-options";
+  const STATUS_URL = window.CC_STATUS_URL
+    || "https://iicorp-ip.vercel.app/api/cc-submission-status";
   const REQUIRED = { store: false, description: false };
 
   function markRequired(fieldId) {
@@ -91,6 +93,51 @@
     }
   }
   upgradeStoreField();
+
+  // THE LINK REMEMBERS. Each link shows what has already been submitted for its
+  // charge - so "did my first one go through?" is answered on the page instead of
+  // guessed at, on any device. Same never-break rule: any failure shows nothing.
+  async function showPreviousSubmissions() {
+    let st = null;
+    try {
+      const ctl = new AbortController();
+      const tm = setTimeout(() => ctl.abort(), 4500);
+      const res = await fetch(STATUS_URL + "?token=" + encodeURIComponent(token), { signal: ctl.signal });
+      clearTimeout(tm);
+      st = await res.json();
+    } catch (_) { return; }
+    if (!st || st.ok !== true || !Array.isArray(st.files) || !st.files.length) return;
+    const box = document.createElement("div");
+    box.className = "note";
+    box.style.cssText = "margin:10px 0;padding:10px 12px;border:1px solid #6b5b1e;border-radius:8px;background:rgba(201,162,39,.08);font-size:13px";
+    const head = document.createElement("div");
+    head.style.fontWeight = "600";
+    head.textContent = "Already submitted for this charge:";
+    box.appendChild(head);
+    st.files.forEach((f) => {
+      const line = document.createElement("div");
+      line.textContent = "\u2713 " + (f.name || "receipt") + (f.at ? " \u2014 " + f.at : "");
+      box.appendChild(line);
+    });
+    const tail = document.createElement("div");
+    tail.style.opacity = "0.8";
+    tail.textContent = "Anything you send now is added to these - nothing gets replaced.";
+    box.appendChild(tail);
+    const bodyEl = document.getElementById("body") || document.body;
+    bodyEl.insertBefore(box, bodyEl.firstChild);
+    // a receipt exists, so a new photo is optional - same as the localStorage
+    // update mode, but now it works from ANY device
+    isUpdateMode = true;
+    if (st.store) {
+      const sEl = $("store");
+      if (sEl && !sEl.value) sEl.value = st.store;
+    }
+    if (st.description) {
+      const dEl = $("description");
+      if (dEl && !dEl.value) dEl.value = st.description;
+    }
+  }
+  showPreviousSubmissions();
 
   if (!TOKEN_RE.test(token)) {
     showError("Link expired or not found",
