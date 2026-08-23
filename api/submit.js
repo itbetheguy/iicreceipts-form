@@ -88,6 +88,7 @@ module.exports = async function handler(req, res) {
       meta.fraud = true;
       meta.note = f.note || "";
     }
+    if (f.temp_charge) meta.temp_charge = true;   // cloud246 - hotel/rental hold, no receipt
 
     const transporter = nodemailer.createTransport({
       service: "gmail",

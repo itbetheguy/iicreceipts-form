@@ -264,6 +264,14 @@
     if (!confirm("Report this charge as not yours? The accounting team will be alerted.")) return;
     submitFraud(note);
   });
+  // cloud246 - a hotel/rental authorization hold that will never have a receipt.
+  // The cardholder says so here (they know); the tracker stops asking and never
+  // escalates it. No file needed - this is the whole point.
+  const tempBtn = $("temp-btn");
+  if (tempBtn) tempBtn.addEventListener("click", () => {
+    if (!confirm("Mark this as a temporary authorization hold (like a hotel or rental deposit) that won't have a receipt?")) return;
+    submitTemp();
+  });
 
   async function submitReceipt(_unused) {
     const files = Array.from(filesInput.files || []);
@@ -331,6 +339,29 @@
     }
   }
 
+  async function submitTemp() {
+    setStatus("Marking…", "info");
+    disableForm(true);
+    try {
+      const res = await fetch("/api/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, cardholder, vendor, amount, date, temp_charge: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus(`Couldn't mark it: ${data.error || res.statusText}`, "error");
+        disableForm(false);
+        return;
+      }
+      try { localStorage.setItem(SUBMITTED_KEY, new Date().toISOString()); } catch (_) {}
+      showDone("Marked as a temporary hold", "Thanks. No receipt is needed for this charge.");
+    } catch (err) {
+      setStatus(`Network error: ${err.message || err}`, "error");
+      disableForm(false);
+    }
+  }
+
   async function submitFraud(note) {
     setStatus("Reporting…", "info");
     disableForm(true);
@@ -372,6 +403,7 @@
   function disableForm(disabled) {
     $("submit-btn").disabled = disabled;
     $("fraud-btn").disabled = disabled;
+    if ($("temp-btn")) $("temp-btn").disabled = disabled;
     filesInput.disabled = disabled;
     $("store").disabled = disabled;
     $("description").disabled = disabled;
