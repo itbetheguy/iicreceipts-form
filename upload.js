@@ -35,6 +35,8 @@
     || "https://iicorp-ip.vercel.app/api/cc-form-options";
   const STATUS_URL = window.CC_STATUS_URL
     || "https://iicorp-ip.vercel.app/api/cc-submission-status";
+  const FILE_URL = window.CC_FILE_URL
+    || "https://iicorp-ip.vercel.app/api/cc-submission-file";
   const REQUIRED = { store: false, description: false };
 
   function markRequired(fieldId) {
@@ -117,9 +119,19 @@
     head.style.fontWeight = "600";
     head.textContent = "Already submitted for this charge:";
     box.appendChild(head);
-    st.files.forEach((f) => {
+    st.files.forEach((f, i) => {
+      // each one opens the actual file, served back by the link's own token
       const line = document.createElement("div");
-      line.textContent = "\u2713 " + (f.name || "receipt") + (f.at ? " \u2014 " + f.at : "");
+      const tick = document.createElement("span");
+      tick.textContent = "\u2713 ";
+      const a = document.createElement("a");
+      a.href = FILE_URL + "?token=" + encodeURIComponent(token) + "&n=" + i;
+      a.target = "_blank"; a.rel = "noopener";
+      a.textContent = f.name || "receipt";
+      a.style.color = "inherit"; a.style.textDecoration = "underline";
+      const when = document.createElement("span");
+      when.textContent = f.at ? " \u2014 " + f.at : "";
+      line.appendChild(tick); line.appendChild(a); line.appendChild(when);
       box.appendChild(line);
     });
     const tail = document.createElement("div");
