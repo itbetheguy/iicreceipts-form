@@ -46,15 +46,27 @@
     if (opt) opt.textContent = "(required)";
   }
 
+  // cloud273 - the options endpoint is a serverless function; a COLD start (its first
+  // hit after idle) can take several seconds, and the old single 4.5s attempt aborted
+  // and left the plain box with NO dropdown and NO required marker (his "i cant see the
+  // dropdown"). Retry a few times with a longer budget so the dropdown reliably appears;
+  // the first failed attempt warms the function, so a retry lands fast. The plain text box
+  // stays fully usable the whole time (the never-go-down rule).
+  async function _fetchJsonRetry(url, tries, ms) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const ctl = new AbortController();
+        const tm = setTimeout(() => ctl.abort(), ms);
+        const res = await fetch(url, { signal: ctl.signal, cache: "no-store" });
+        clearTimeout(tm);
+        const j = await res.json();
+        if (j) return j;
+      } catch (_) { /* cold start / slow / transient: try again */ }
+    }
+    return null;
+  }
   async function upgradeStoreField() {
-    let cfg = null;
-    try {
-      const ctl = new AbortController();
-      const tm = setTimeout(() => ctl.abort(), 4500);
-      const res = await fetch(OPTIONS_URL, { signal: ctl.signal });
-      clearTimeout(tm);
-      cfg = await res.json();
-    } catch (_) { return; }                    // unreachable/slow: stay plain
+    const cfg = await _fetchJsonRetry(OPTIONS_URL, 3, 7000);
     if (!cfg || cfg.ok !== true) return;
     if (cfg.require_description) { REQUIRED.description = true; markRequired("description"); }
     if (cfg.require_store) { REQUIRED.store = true; markRequired("store"); }
@@ -129,14 +141,9 @@
   // charge - so "did my first one go through?" is answered on the page instead of
   // guessed at, on any device. Same never-break rule: any failure shows nothing.
   async function showPreviousSubmissions() {
-    let st = null;
-    try {
-      const ctl = new AbortController();
-      const tm = setTimeout(() => ctl.abort(), 4500);
-      const res = await fetch(STATUS_URL + "?token=" + encodeURIComponent(token), { signal: ctl.signal });
-      clearTimeout(tm);
-      st = await res.json();
-    } catch (_) { return; }
+    // cloud273 - same cold-start resilience as the options fetch, so the "already
+    // submitted" note survives a slow first hit instead of silently never showing.
+    const st = await _fetchJsonRetry(STATUS_URL + "?token=" + encodeURIComponent(token), 2, 7000);
     if (!st || st.ok !== true || !Array.isArray(st.files) || !st.files.length) return;
     const box = document.createElement("div");
     box.className = "note";
