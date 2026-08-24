@@ -146,32 +146,55 @@
     // submitted" note survives a slow first hit instead of silently never showing.
     const st = await _fetchJsonRetry(STATUS_URL + "?token=" + encodeURIComponent(token), 2, 7000);
     if (!st || st.ok !== true || !Array.isArray(st.files) || !st.files.length) return;
+
+    /* cloud274 - the "already submitted" state was easy to miss (a faint gold note buried
+       in the form). Now it reads as a clear STATUS line item in the charge summary AND a
+       prominent green banner at the top of the form, with the file(s) as clean rows. */
+    const n = st.files.length;
+    const statusRow = document.getElementById("m-status-row");
+    const statusVal = document.getElementById("m-status");
+    if (statusRow && statusVal) {
+      statusVal.textContent = "\u2713 Submitted" + (n > 1 ? " (" + n + " files)" : "");
+      statusRow.hidden = false;
+    }
+
     const box = document.createElement("div");
-    box.className = "note";
-    box.style.cssText = "margin:10px 0;padding:10px 12px;border:1px solid #6b5b1e;border-radius:8px;background:rgba(201,162,39,.08);font-size:13px";
+    box.className = "submitted-banner";
     const head = document.createElement("div");
-    head.style.fontWeight = "600";
-    head.textContent = "Already submitted for this charge:";
+    head.className = "submitted-head";
+    head.innerHTML = '<span class="submitted-check">\u2713</span><span>Already submitted for this charge</span>';
     box.appendChild(head);
+
+    const fileWrap = document.createElement("div");
+    fileWrap.className = "submitted-files";
     st.files.forEach((f, i) => {
       // each one opens the actual file, served back by the link's own token
-      const line = document.createElement("div");
-      const tick = document.createElement("span");
-      tick.textContent = "\u2713 ";
       const a = document.createElement("a");
+      a.className = "submitted-file";
       a.href = FILE_URL + "?token=" + encodeURIComponent(token) + "&n=" + i;
       a.target = "_blank"; a.rel = "noopener";
-      a.textContent = f.name || "receipt";
-      a.style.color = "inherit"; a.style.textDecoration = "underline";
-      const when = document.createElement("span");
-      when.textContent = f.at ? " \u2014 " + f.at : "";
-      line.appendChild(tick); line.appendChild(a); line.appendChild(when);
-      box.appendChild(line);
+      const nm = document.createElement("span");
+      nm.className = "submitted-file-name";
+      nm.textContent = f.name || "receipt";
+      const meta = document.createElement("span");
+      meta.className = "submitted-file-meta";
+      meta.textContent = (f.at ? f.at + " \u00b7 " : "") + "Open \u2197";
+      a.appendChild(nm); a.appendChild(meta);
+      // cloud274 - the file is fetched live from the mailbox, so the FIRST open can take a
+      // few seconds; give immediate feedback so a click never looks like it did nothing.
+      a.addEventListener("click", () => {
+        meta.textContent = "Opening\u2026 (first open can take a few seconds)";
+        setTimeout(() => { meta.textContent = (f.at ? f.at + " \u00b7 " : "") + "Open \u2197"; }, 18000);
+      });
+      fileWrap.appendChild(a);
     });
+    box.appendChild(fileWrap);
+
     const tail = document.createElement("div");
-    tail.style.opacity = "0.8";
-    tail.textContent = "Anything you send now is added to these - nothing gets replaced.";
+    tail.className = "submitted-tail";
+    tail.textContent = "Anything you send now is added to these \u2014 nothing gets replaced.";
     box.appendChild(tail);
+
     const bodyEl = document.getElementById("body") || document.body;
     bodyEl.insertBefore(box, bodyEl.firstChild);
     // a receipt exists, so a new photo is optional - same as the localStorage
