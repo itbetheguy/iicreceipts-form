@@ -37,7 +37,7 @@
     || "https://iicorp-ip.vercel.app/api/cc-submission-status";
   const FILE_URL = window.CC_FILE_URL
     || "https://iicorp-ip.vercel.app/api/cc-submission-file";
-  const REQUIRED = { store: false, description: false };
+  const REQUIRED = { store: false, description: false, photo: true };   // cloud274 #20 - photo default on
 
   function markRequired(fieldId) {
     const label = document.querySelector('label[for="' + fieldId + '"]');
@@ -70,6 +70,7 @@
     if (!cfg || cfg.ok !== true) return;
     if (cfg.require_description) { REQUIRED.description = true; markRequired("description"); }
     if (cfg.require_store) { REQUIRED.store = true; markRequired("store"); }
+    if (cfg.require_photo === false) REQUIRED.photo = false;   // cloud274 #20 - honor the admin's toggle
     // cloud252 - if the admin set the Store field to free text, keep the plain box
     // even when options exist
     if (cfg.store_field_type === "free") return;
@@ -311,7 +312,7 @@
     // First-time submission: at least one file is required. Update
     // mode skips the check — store/description edits without a new
     // photo are valid and useful (correcting the wrong store, etc.).
-    if (!isUpdateMode && files.length === 0) {
+    if (REQUIRED.photo && !isUpdateMode && files.length === 0) {   // cloud274 #20 - honor require_photo
       setStatus("Please attach at least one receipt photo or PDF.", "error");
       return;
     }

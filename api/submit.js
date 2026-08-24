@@ -90,6 +90,22 @@ module.exports = async function handler(req, res) {
     }
     if (f.temp_charge) meta.temp_charge = true;   // cloud246 - hotel/rental hold, no receipt
 
+    /* cloud274 #8 - enforce the admin's require_store / require_description toggles on the
+       SERVER too. The client gate is bypassable by design (the never-go-down rule keeps the
+       plain box working when the options endpoint fails), so it can't be the only guard.
+       Skipped for fraud / temporary-hold submissions (those legitimately have no store).
+       Fails CLOSED on the store when settings can't be read (store is required on prod and
+       is what accounting needs to book the charge) so an endpoint hiccup can't drop policy. */
+    if (!fraud && !f.temp_charge) {
+      const reqs = await fetchRequirements();
+      const needStore = reqs ? reqs.require_store : true;
+      const needDesc  = reqs ? reqs.require_description : false;
+      if (needStore && !String(f.store || "").trim())
+        return res.status(400).json({ error: "Please choose which store (or company) this charge is for." });
+      if (needDesc && !String(f.description || "").trim())
+        return res.status(400).json({ error: "Please add a short description — accounting needs it to book the charge." });
+    }
+
     const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: { user: env.user, pass: env.pass },
@@ -141,6 +157,23 @@ function parseMultipart(req) {
 
     req.pipe(bb);
   });
+}
+
+// cloud274 #8 - read the admin's require_* toggles (authoritative) for server-side
+// enforcement. Returns null if it can't be read, so the caller can fail closed.
+async function fetchRequirements() {
+  try {
+    const url = process.env.CC_OPTIONS_URL || "https://iicorp-ip.vercel.app/api/cc-form-options";
+    const ctl = new AbortController();
+    const tm = setTimeout(() => ctl.abort(), 6000);
+    const r = await fetch(url, { signal: ctl.signal });
+    clearTimeout(tm);
+    const j = await r.json();
+    if (j && j.ok === true) {
+      return { require_store: !!j.require_store, require_description: !!j.require_description };
+    }
+  } catch (_) {}
+  return null;
 }
 
 function readJson(req) {
