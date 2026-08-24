@@ -70,17 +70,48 @@
        Options are stashed so submit can look the store number (code) + kind back up
        by the chosen label. */
     window.__STORE_OPTS = options.slice();
-    const dl = document.createElement("datalist");
-    dl.id = "store-options";
-    options.forEach((o) => {
-      if (!o || !o.label) return;
-      const op = document.createElement("option");
-      op.value = o.label;                      // the human-readable "store# - company"
-      dl.appendChild(op);
-    });
-    input.setAttribute("list", "store-options");
+    /* cloud272 - a TYPABLE dropdown that shows the store NUMBER in solid text with the
+       company in gray ghost text ("3654 — Gulf Coast Jack"). A native <datalist> can't
+       gray part of an option, so this is a small custom combobox. On pick it records the
+       store number (code) so the submission carries the number, and it stays typable for
+       a store that isn't listed ("the dropdown is just for options"). */
     if (!input.placeholder) input.placeholder = "Type or pick a store…";
-    (input.parentNode || document.body).appendChild(dl);
+    input.setAttribute("autocomplete", "off");
+    const wrap = document.createElement("div");
+    wrap.className = "cc-combo";
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    const panel = document.createElement("div");
+    panel.className = "cc-combo-panel";
+    wrap.appendChild(panel);
+    const ghostOf = (o) => o.kind === "company" ? "all locations" : (o.company || "");
+    function renderPanel() {
+      panel.innerHTML = "";
+      const qq = input.value.trim().toLowerCase();
+      const list = options.filter((o) => o && o.label && (!qq
+        || String(o.label).toLowerCase().indexOf(qq) >= 0
+        || String(o.company || "").toLowerCase().indexOf(qq) >= 0
+        || String(o.code || "").toLowerCase().indexOf(qq) >= 0)).slice(0, 80);
+      if (!list.length) { panel.style.display = "none"; return; }
+      list.forEach((o) => {
+        const row = document.createElement("div");
+        row.className = "cc-combo-opt";
+        const main = document.createElement("span");
+        main.className = "cc-combo-main"; main.textContent = o.label;
+        row.appendChild(main);
+        const g = ghostOf(o);
+        if (g) { const gs = document.createElement("span");
+          gs.className = "cc-combo-ghost"; gs.textContent = " — " + g; row.appendChild(gs); }
+        row.addEventListener("mousedown", (e) => { e.preventDefault();
+          input.value = o.label; input.dataset.code = o.code || ""; input.dataset.kind = o.kind || "";
+          panel.style.display = "none"; });
+        panel.appendChild(row);
+      });
+      panel.style.display = "block";
+    }
+    input.addEventListener("focus", renderPanel);
+    input.addEventListener("input", () => { input.dataset.code = ""; input.dataset.kind = ""; renderPanel(); });
+    input.addEventListener("blur", () => setTimeout(() => { panel.style.display = "none"; }, 150));
     if (cfg.store_hint) {
       const hint = document.createElement("div");
       hint.className = "opt";
@@ -290,16 +321,16 @@
     // what the chosen option is LINKED TO: a specific store, or a whole company
     // (split across its open locations). Rides in the email for the QB export work.
     let storeCode = "", storeKind = "";
-    /* cloud271 - match the typed/picked value back to a configured option to get its
-       store number (code) + kind; a freely-typed store simply has no code, which is
-       fine (the admin can set it later). */
-    const _opts = window.__STORE_OPTS || [];
-    const _match = _opts.find((o) => o && o.label === store);
-    if (_match) { storeCode = _match.code || ""; storeKind = _match.kind || ""; }
+    /* cloud272 - the store number comes from the option the cardholder picked (stashed
+       on the input as data-code/data-kind by the combobox). If they typed a value that
+       still matches a configured label, use that option's code; a freely-typed store
+       that matches nothing has no code (the admin can set it later). */
     const sEl = $("store");
-    if (!_match && sEl && sEl.tagName === "SELECT" && sEl.selectedIndex > -1) {
-      const op = sEl.options[sEl.selectedIndex];
-      if (op && op.dataset) { storeCode = op.dataset.code || ""; storeKind = op.dataset.kind || ""; }
+    if (sEl && sEl.dataset && sEl.dataset.code) { storeCode = sEl.dataset.code; storeKind = sEl.dataset.kind || ""; }
+    if (!storeCode) {
+      const _opts = window.__STORE_OPTS || [];
+      const _match = _opts.find((o) => o && o.label === store);
+      if (_match) { storeCode = _match.code || ""; storeKind = _match.kind || ""; }
     }
 
     const fd = new FormData();

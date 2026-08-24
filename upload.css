@@ -320,3 +320,29 @@ button:disabled {
   background: var(--danger);
   border-color: var(--danger);
 }
+
+/* cloud272 - the store combobox: number solid, company gray ghost text */
+.cc-combo { position: relative; }
+.cc-combo-panel {
+  display: none;
+  position: absolute;
+  left: 0; right: 0; top: calc(100% + 4px);
+  z-index: 40;
+  max-height: 260px; overflow-y: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.5);
+  padding: 4px;
+}
+.cc-combo-opt {
+  padding: 9px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 15px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cc-combo-opt:hover { background: var(--accent); color: #0d0d0d; }
+.cc-combo-main { font-weight: 600; }
+.cc-combo-ghost { color: var(--text-faint); font-weight: 400; }
+.cc-combo-opt:hover .cc-combo-ghost { color: #0d0d0d; opacity: .75; }
