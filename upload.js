@@ -54,14 +54,18 @@
   // stays fully usable the whole time (the never-go-down rule).
   async function _fetchJsonRetry(url, tries, ms) {
     for (let i = 0; i < tries; i++) {
+      const ctl = new AbortController();
+      const tm = setTimeout(() => ctl.abort(), ms);
       try {
-        const ctl = new AbortController();
-        const tm = setTimeout(() => ctl.abort(), ms);
         const res = await fetch(url, { signal: ctl.signal, cache: "no-store" });
-        clearTimeout(tm);
+        // cloud341 - the abort budget now also covers the BODY read (res.json). Previously the
+        // timer was cleared the instant headers arrived, so a response that sent 200 + headers
+        // then STALLED its body would hang res.json() forever - and the fraud gate awaits this,
+        // so its "buttons disabled until we know" would never lift. Now a stalled body aborts at ms.
         const j = await res.json();
         if (j) return j;
-      } catch (_) { /* cold start / slow / transient: try again */ }
+      } catch (_) { /* cold start / slow / transient / stalled body: try again */ }
+      finally { clearTimeout(tm); }
     }
     return null;
   }
@@ -145,6 +149,10 @@
     // cloud273 - same cold-start resilience as the options fetch, so the "already
     // submitted" note survives a slow first hit instead of silently never showing.
     const st = await _fetchJsonRetry(STATUS_URL + "?token=" + encodeURIComponent(token), 2, 7000);
+    // cloud341 - a fraud charge is owned by the fraud gate (it locks the whole form); never paint
+    // the green "already submitted - add more" banner or switch to update-mode on one, even if it
+    // has receipts on file (is_fraud and files are independent in the response).
+    if (st && st.is_fraud === true) return;
     if (!st || st.ok !== true || !Array.isArray(st.files) || !st.files.length) return;
 
     /* cloud274 - the "already submitted" state was easy to miss (a faint gold note buried
@@ -345,6 +353,44 @@
     if (!confirm("Mark this as a temporary authorization hold (like a hotel or rental deposit) that won't have a receipt?")) return;
     submitTemp();
   });
+
+  /* cloud341 - HIS BUG (ss2 vs ss4): a charge already marked fraud - in the app, or reported from
+     ANOTHER device - opened the FULL form, because the fraud lock above only fires from THIS
+     device's localStorage flag. A charge freshly marked on THIS device gated only because its flag
+     had just been set. The SERVER is the authority on fraud, not the device. So when this device
+     holds no local lock, ask the server for the charge's CURRENT status and gate if it is fraud,
+     from any device. The form is already on screen for speed, so only the ACTION buttons are held
+     until we know (store / description / photo stay usable meanwhile); the fast path shows no note,
+     a cold endpoint shows a brief "Checking...". Unreachable with no local flag -> allow (fail open,
+     same as today) - this check only ever adds a lock, never removes the reporting-device one. */
+  if (!isFraudLocked) {
+    disableActions(true);
+    const _checkNote = setTimeout(() => setStatus("Checking this charge…", ""), 400);
+    (async () => {
+      let serverFraud = null;   // true / false / null (couldn't reach the server)
+      try {
+        const st = await _fetchJsonRetry(STATUS_URL + "?token=" + encodeURIComponent(token), 2, 7000);
+        if (st && st.ok === true) serverFraud = (st.is_fraud === true);
+      } catch (_) { /* unreachable -> unknown, allow the form */ }
+      clearTimeout(_checkNote);
+      if (serverFraud === true) {
+        try { localStorage.setItem(FRAUD_KEY, new Date().toISOString()); } catch (_) {}   // gate instantly on reload
+        showError("Reported as fraud",
+          "This charge was reported as fraudulent. If that was a mistake, "
+          + "contact your accounting admin to unlock the link.");
+        return;
+      }
+      const s = $("status");
+      if (s && /Checking this charge/.test(s.textContent || "")) s.hidden = true;
+      disableActions(false);   // not fraud, or unreachable with no local lock -> allow submission
+    })();
+  }
+
+  function disableActions(d) {
+    $("submit-btn").disabled = d;
+    if ($("temp-btn")) $("temp-btn").disabled = d;
+    $("fraud-btn").disabled = d;
+  }
 
   async function submitReceipt(_unused) {
     const files = Array.from(filesInput.files || []);
