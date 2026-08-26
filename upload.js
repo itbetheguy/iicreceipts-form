@@ -13,7 +13,7 @@
 //     localStorage state, so the backend can flip it via the reminder
 //     email URL if needed for the cross-device case.
 
-(function () {
+(async function () {
   "use strict";
 
   const $ = (id) => document.getElementById(id);
@@ -243,11 +243,27 @@
   // Fraud lock short-circuits everything: show a locked-out screen and
   // never render the form. The cardholder has to contact accounting to
   // get the link unlocked (admin clicks Unmark Fraud in the dashboard).
+  /* cloud331 - HIS BUG: "i unmarked it to review and opened the link and the link was still
+     saying marked as fraud." The lock is per-device localStorage and NEVER checked the server,
+     so an admin un-flagging the charge in the app couldn't unlock the link on the device that
+     reported it. Now: if we hold a local fraud lock, ask the server for the CURRENT status - if
+     it's no longer fraud, drop the stale lock and show the form; if it's still fraud (or the
+     server can't be reached), stay locked. */
   if (isFraudLocked) {
-    showError("Reported as fraud",
-      "This charge was reported as fraudulent. If that was a mistake, "
-      + "contact your accounting admin to unlock the link.");
-    return;
+    let serverSaysCleared = false;
+    try {
+      const st = await _fetchJsonRetry(STATUS_URL + "?token=" + encodeURIComponent(token), 2, 7000);
+      if (st && st.ok && st.is_fraud === false) serverSaysCleared = true;
+    } catch (_) { /* can't reach the server -> keep the lock (fail safe) */ }
+    if (serverSaysCleared) {
+      try { localStorage.removeItem(FRAUD_KEY); } catch (_) {}
+      isFraudLocked = false;   // admin cleared it -> fall through to the normal form
+    } else {
+      showError("Reported as fraud",
+        "This charge was reported as fraudulent. If that was a mistake, "
+        + "contact your accounting admin to unlock the link.");
+      return;
+    }
   }
 
   $("m-cardholder").textContent = cardholder || "—";
