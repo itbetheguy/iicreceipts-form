@@ -131,12 +131,22 @@ module.exports = async function handler(req, res) {
        actual receipt FILE, so a hiccup here never fails the form. */
     try {
       const REPORT_URL = process.env.CC_REPORT_FRAUD_URL || "https://iicorp-ip.vercel.app/api/cc-report-fraud";
-      await fetch(REPORT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: token, note: f.note || "", cardholder: f.cardholder || "",
-          fraud: fraud, temp_charge: !!f.temp_charge }),
-      });
+      /* cloud340 - the processor flips the status FIRST thing, then may fetch the original Citi
+         email over IMAP before emailing the alert - which can be slow. Bound OUR wait to ~7s so a
+         slow alert never hangs (or, on the platform's own timeout, ERRORS) this form: the flip has
+         already happened server-side, and the mailbox sweep is the durable backstop for the alert.
+         The submission email above is already sent, so the record is safe regardless. */
+      const _ac = new AbortController();
+      const _to = setTimeout(() => { try { _ac.abort(); } catch (_) {} }, 7000);
+      try {
+        await fetch(REPORT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: token, note: f.note || "", cardholder: f.cardholder || "",
+            fraud: fraud, temp_charge: !!f.temp_charge }),
+          signal: _ac.signal,
+        });
+      } finally { clearTimeout(_to); }
     } catch (_) { /* the emailed submission + the mailbox sweep still catch it */ }
 
     return res.status(200).json({ ok: true, file_count: files.length });
