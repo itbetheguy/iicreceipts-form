@@ -123,6 +123,22 @@ module.exports = async function handler(req, res) {
       })),
     });
 
+    /* cloud336 - INSTANT fraud. His ask: "make the fraud stuff faster... it just shows up in the
+       program quick." On a "not mine" report, tell the processor RIGHT NOW so the charge flips to
+       fraud and the alert emails immediately, instead of waiting up to ~5 min for the next mailbox
+       sweep. Best-effort and awaited briefly: the emailed report above is the permanent record, so
+       a hiccup here never fails the form (the sweep still catches it). */
+    if (fraud) {
+      try {
+        const REPORT_URL = process.env.CC_REPORT_FRAUD_URL || "https://iicorp-ip.vercel.app/api/cc-report-fraud";
+        await fetch(REPORT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: token, note: f.note || "", cardholder: f.cardholder || "" }),
+        });
+      } catch (_) { /* the emailed report + the mailbox sweep still catch it */ }
+    }
+
     return res.status(200).json({ ok: true, file_count: files.length });
   } catch (err) {
     console.error("submit error:", err);
