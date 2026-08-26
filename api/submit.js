@@ -94,16 +94,20 @@ module.exports = async function handler(req, res) {
        SERVER too. The client gate is bypassable by design (the never-go-down rule keeps the
        plain box working when the options endpoint fails), so it can't be the only guard.
        Skipped for fraud / temporary-hold submissions (those legitimately have no store).
-       Fails CLOSED on the store when settings can't be read (store is required on prod and
-       is what accounting needs to book the charge) so an endpoint hiccup can't drop policy. */
+       cloud342 (audit) - FAIL OPEN when settings can't be read: the old code failed CLOSED on the
+       store, but during a settings-endpoint blip the CLIENT (which reads the same endpoint) also
+       can't flag store required, so a cardholder who left it blank because nothing said otherwise
+       got hard-rejected with no email sent - the exact "form goes down" outcome the never-go-down
+       rule forbids. When reqs is null we skip enforcement (the submission still emails and the sweep
+       reconciles; the store can be corrected later); we only enforce a requirement we could confirm. */
     if (!fraud && !f.temp_charge) {
       const reqs = await fetchRequirements();
-      const needStore = reqs ? reqs.require_store : true;
-      const needDesc  = reqs ? reqs.require_description : false;
-      if (needStore && !String(f.store || "").trim())
-        return res.status(400).json({ error: "Please choose which store (or company) this charge is for." });
-      if (needDesc && !String(f.description || "").trim())
-        return res.status(400).json({ error: "Please add a short description — accounting needs it to book the charge." });
+      if (reqs) {
+        if (reqs.require_store && !String(f.store || "").trim())
+          return res.status(400).json({ error: "Please choose which store (or company) this charge is for." });
+        if (reqs.require_description && !String(f.description || "").trim())
+          return res.status(400).json({ error: "Please add a short description — accounting needs it to book the charge." });
+      }
     }
 
     const transporter = nodemailer.createTransport({
@@ -129,6 +133,7 @@ module.exports = async function handler(req, res) {
        advances No-receipt -> Submitted - instead of waiting up to ~5 min for the next mailbox
        sweep. The emailed submission above is still the record and the sweep still attaches the
        actual receipt FILE, so a hiccup here never fails the form. */
+    let instant = null;
     try {
       const REPORT_URL = process.env.CC_REPORT_FRAUD_URL || "https://iicorp-ip.vercel.app/api/cc-report-fraud";
       /* cloud340 - the processor flips the status FIRST thing, then may fetch the original Citi
@@ -139,17 +144,23 @@ module.exports = async function handler(req, res) {
       const _ac = new AbortController();
       const _to = setTimeout(() => { try { _ac.abort(); } catch (_) {} }, 7000);
       try {
-        await fetch(REPORT_URL, {
+        const _r = await fetch(REPORT_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          // cloud342 (audit) - file_count so the processor doesn't advance a FIELDS-ONLY update (0 files)
+          // to "submitted" (marking a receipt received that isn't there).
           body: JSON.stringify({ token: token, note: f.note || "", cardholder: f.cardholder || "",
-            fraud: fraud, temp_charge: !!f.temp_charge }),
+            fraud: fraud, temp_charge: !!f.temp_charge, file_count: files.length }),
           signal: _ac.signal,
         });
+        try { instant = await _r.json(); } catch (_) { /* keep instant null */ }
       } finally { clearTimeout(_to); }
     } catch (_) { /* the emailed submission + the mailbox sweep still catch it */ }
 
-    return res.status(200).json({ ok: true, file_count: files.length });
+    // cloud342 (audit) - forward whether the instant status flip actually happened so the form can be
+    // HONEST (e.g. a "temporary charge" on an already-submitted charge changes nothing; don't claim it did).
+    return res.status(200).json({ ok: true, file_count: files.length,
+      instant_changed: instant ? !!instant.changed : null, instant_status: instant ? instant.status : null });
   } catch (err) {
     console.error("submit error:", err);
     return res.status(500).json({ error: err.message || "internal error" });

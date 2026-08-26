@@ -480,7 +480,14 @@
         return;
       }
       try { localStorage.setItem(SUBMITTED_KEY, new Date().toISOString()); } catch (_) {}
-      showDone("Marked as a temporary hold", "Thanks. No receipt is needed for this charge.");
+      // cloud342 (audit) - only a still-pending charge becomes a temp hold. If the processor reports
+      // it did NOT change (the charge already has a receipt or a decision on file), don't claim it
+      // was marked - say so honestly instead of a false success.
+      if (data && data.instant_changed === false) {
+        showDone("Nothing to change", "This charge already has a receipt or a decision on file, so it wasn't marked as a temporary hold. If that's unexpected, contact your accounting team.");
+      } else {
+        showDone("Marked as a temporary hold", "Thanks. No receipt is needed for this charge.");
+      }
     } catch (err) {
       setStatus(`Network error: ${err.message || err}`, "error");
       disableForm(false);
