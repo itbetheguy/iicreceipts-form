@@ -92,7 +92,18 @@
        gray part of an option, so this is a small custom combobox. On pick it records the
        store number (code) so the submission carries the number, and it stays typable for
        a store that isn't listed ("the dropdown is just for options"). */
-    if (!input.placeholder) input.placeholder = "Type or pick a store…";
+    /* cloud402 - HIS ASK: "he wants the form to have the store field locked to only my answer
+       choices. the other thing i want is to be able to choose multiple stores. so if i am
+       typing JIB 640, 640 should pop up in the drop down of the form and i click it and i can
+       continue to type JIB 765 and i can choose 765."
+       So the box is a SEARCH box and every pick becomes a chip. LOCKED mode (the admin's
+       choice) refuses anything that isn't a pick; the existing "dropdown" mode still lets a
+       cardholder type a store that isn't listed, exactly as it does today. */
+    const LOCKED = cfg.store_field_type === "locked";
+    window.__STORE_LOCKED = LOCKED;
+    const chosen = [];
+    window.__STORE_CHOSEN = chosen;
+    input.placeholder = LOCKED ? "Search your stores…" : "Type or pick a store…";
     input.setAttribute("autocomplete", "off");
     const wrap = document.createElement("div");
     wrap.className = "cc-combo";
@@ -101,11 +112,50 @@
     const panel = document.createElement("div");
     panel.className = "cc-combo-panel";
     wrap.appendChild(panel);
+    // the chips sit above the box, so a second and third pick read as a list
+    const chipBox = document.createElement("div");
+    chipBox.className = "cc-chips";
+    wrap.parentNode.insertBefore(chipBox, wrap);
+    const keyOf = (o) => String((o && (o.code || o.label)) || "").toLowerCase();
+    function drawChips() {
+      chipBox.innerHTML = "";
+      chosen.forEach((c, i) => {
+        const chip = document.createElement("span");
+        chip.className = "cc-chip";
+        const t = document.createElement("span");
+        t.textContent = c.label + (c.kind === "company" ? " (all locations)" : "");
+        chip.appendChild(t);
+        const x = document.createElement("button");
+        x.type = "button"; x.className = "cc-chip-x"; x.setAttribute("aria-label", "Remove " + c.label);
+        x.textContent = "×";
+        x.addEventListener("click", () => { chosen.splice(i, 1); drawChips(); });
+        chip.appendChild(x);
+        chipBox.appendChild(chip);
+      });
+      if (chosen.length > 1) {
+        const note = document.createElement("div");
+        note.className = "opt";
+        note.style.marginTop = "2px";
+        note.textContent = "This charge will be split evenly across these " + chosen.length + " stores.";
+        chipBox.appendChild(note);
+      }
+    }
+    function addChoice(o) {
+      if (!o || !o.label) return;
+      if (chosen.some((c) => keyOf(c) === keyOf(o))) return;   // never the same store twice
+      if (chosen.length >= 12) return;
+      chosen.push({ label: o.label, code: o.code || "", kind: o.kind || "" });
+      input.value = ""; input.dataset.code = ""; input.dataset.kind = "";
+      drawChips();
+    }
+    window.__STORE_ADD = addChoice;   // used by the "already submitted" prefill
     const ghostOf = (o) => o.kind === "company" ? "all locations" : (o.company || "");
     function renderPanel() {
       panel.innerHTML = "";
       const qq = input.value.trim().toLowerCase();
-      const list = options.filter((o) => o && o.label && (!qq
+      const list = options.filter((o) => o && o.label
+        && !chosen.some((c) => keyOf(c) === keyOf(o))          // already picked: out of the list
+        && (!qq
         || String(o.label).toLowerCase().indexOf(qq) >= 0
         || String(o.company || "").toLowerCase().indexOf(qq) >= 0
         || String(o.code || "").toLowerCase().indexOf(qq) >= 0)).slice(0, 80);
@@ -120,14 +170,19 @@
         if (g) { const gs = document.createElement("span");
           gs.className = "cc-combo-ghost"; gs.textContent = " — " + g; row.appendChild(gs); }
         row.addEventListener("mousedown", (e) => { e.preventDefault();
-          input.value = o.label; input.dataset.code = o.code || ""; input.dataset.kind = o.kind || "";
-          panel.style.display = "none"; });
+          addChoice(o);
+          renderPanel();   // keep the list open so the next store is one click away
+        });
         panel.appendChild(row);
       });
       panel.style.display = "block";
     }
     input.addEventListener("focus", renderPanel);
     input.addEventListener("input", () => { input.dataset.code = ""; input.dataset.kind = ""; renderPanel(); });
+    // backspace on an empty box takes the last chip back off
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" && !input.value && chosen.length) { chosen.pop(); drawChips(); renderPanel(); }
+    });
     input.addEventListener("blur", () => setTimeout(() => { panel.style.display = "none"; }, 150));
     if (cfg.store_hint) {
       const hint = document.createElement("div");
@@ -210,13 +265,18 @@
     isUpdateMode = true;
     if (st.store) {
       const sEl = $("store");
-      if (sEl && !sEl.value) {
-        if (sEl.tagName === "SELECT"
-            && !Array.prototype.some.call(sEl.options, (op) => op.value === st.store)) {
-          const op = document.createElement("option");
-          op.value = st.store; op.textContent = st.store + " (as submitted before)";
-          sEl.appendChild(op);
-        }
+      /* cloud402 - rebuild the CHIPS from what was submitted before ("JIB 3640 + JIB 0765"),
+         so an update keeps every store instead of collapsing to one typed string. Anything
+         that doesn't match a configured option falls back to the plain box, which is the only
+         thing that worked before. (The dead SELECT branch went with it — no <select> has
+         existed since the combobox landed.) */
+      const add = window.__STORE_ADD;
+      const opts = window.__STORE_OPTS || [];
+      const parts = String(st.store).split(" + ").map((p) => p.trim()).filter(Boolean);
+      const matched = parts.map((p) => opts.find((o) => o && o.label === p)).filter(Boolean);
+      if (add && matched.length && matched.length === parts.length) {
+        matched.forEach(add);
+      } else if (sEl && !sEl.value && !window.__STORE_LOCKED) {
         sEl.value = st.store;
       }
     }
@@ -401,10 +461,24 @@
       setStatus("Please attach at least one receipt photo or PDF.", "error");
       return;
     }
-    const store       = $("store").value.trim();
+    /* cloud402 - one or SEVERAL stores. Chips are the answer; the box is a search box.
+       With exactly one pick the payload below is byte-identical to what it has always been,
+       so an older parser on the app side keeps working unchanged. */
+    const chosenStores = (window.__STORE_CHOSEN || []).slice();
+    const lockedStores = !!window.__STORE_LOCKED;
+    const typedStore  = $("store") ? $("store").value.trim() : "";
+    const store       = chosenStores.length
+      ? chosenStores.map((c) => c.label).join(" + ").slice(0, 118)
+      : (lockedStores ? "" : typedStore);
     const description = $("description").value.trim();
+    if (lockedStores && !chosenStores.length && typedStore) {
+      setStatus("Pick your store from the list — a typed name can't be used here.", "error");
+      return;
+    }
     if (REQUIRED.store && !store) {
-      setStatus("Please choose which store (or company) this charge is for.", "error");
+      setStatus(lockedStores
+        ? "Please pick your store from the list."
+        : "Please choose which store (or company) this charge is for.", "error");
       return;
     }
     if (REQUIRED.description && !description) {
@@ -419,7 +493,9 @@
        still matches a configured label, use that option's code; a freely-typed store
        that matches nothing has no code (the admin can set it later). */
     const sEl = $("store");
-    if (sEl && sEl.dataset && sEl.dataset.code) { storeCode = sEl.dataset.code; storeKind = sEl.dataset.kind || ""; }
+    // cloud402 - with chips, the FIRST pick carries the code/kind (unchanged for one pick)
+    if (chosenStores.length) { storeCode = chosenStores[0].code || ""; storeKind = chosenStores[0].kind || ""; }
+    if (!storeCode && sEl && sEl.dataset && sEl.dataset.code) { storeCode = sEl.dataset.code; storeKind = sEl.dataset.kind || ""; }
     if (!storeCode) {
       const _opts = window.__STORE_OPTS || [];
       const _match = _opts.find((o) => o && o.label === store);
@@ -435,6 +511,10 @@
     fd.append("store", store);
     fd.append("store_code", storeCode);
     fd.append("store_kind", storeKind);
+    /* cloud402 - the full list rides ALONGSIDE the fields above, never instead of them, so an
+       app that doesn't know about `stores` yet still books the submission correctly. */
+    if (chosenStores.length) fd.append("stores", JSON.stringify(chosenStores.map((c) => ({
+      store: c.label, code: c.code || "", kind: c.kind || "" }))));
     fd.append("description", description);
     files.forEach((f) => fd.append("files", f, f.name));
 
@@ -538,6 +618,8 @@
     if ($("temp-btn")) $("temp-btn").disabled = disabled;
     filesInput.disabled = disabled;
     $("store").disabled = disabled;
+    // cloud402 - the chip × buttons are part of the form, so they lock with it
+    document.querySelectorAll(".cc-chip-x").forEach((b) => { b.disabled = disabled; });
     $("description").disabled = disabled;
   }
 

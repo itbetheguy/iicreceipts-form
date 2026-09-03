@@ -84,6 +84,22 @@ module.exports = async function handler(req, res) {
       submitted_at: new Date().toISOString(),
       file_count:  files.length,
     };
+    /* cloud402 - SEVERAL stores on one charge. `meta` is built key by key, so a field that
+       isn't named here never reaches the email. Parsed defensively: a malformed value is
+       dropped and `store` (which already carries the joined label) still books the charge. */
+    if (f.stores) {
+      try {
+        const list = JSON.parse(String(f.stores));
+        if (Array.isArray(list) && list.length) {
+          meta.stores = list.slice(0, 12).map((s) => ({
+            store: String((s && s.store) || "").slice(0, 120),
+            code:  String((s && s.code)  || "").slice(0, 40),
+            kind:  (s && s.kind) === "company" ? "company" : "store",
+          })).filter((s) => s.store);
+          if (!meta.stores.length) delete meta.stores;
+        }
+      } catch (_) { /* the joined `store` string above still carries the answer */ }
+    }
     if (fraud) {
       meta.fraud = true;
       meta.note = f.note || "";

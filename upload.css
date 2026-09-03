@@ -347,6 +347,24 @@ button:disabled {
 .cc-combo-ghost { color: var(--text-faint); font-weight: 400; }
 .cc-combo-opt:hover .cc-combo-ghost { color: #0d0d0d; opacity: .75; }
 
+/* cloud402 - SEVERAL stores on one charge: each pick becomes a chip above the search box
+   ("i click it and i can continue to type JIB 765 and i can choose 765"). Big enough to tap. */
+.cc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.cc-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--accent); color: #0d0d0d;
+  border-radius: 14px; padding: 5px 6px 5px 12px;
+  font-size: 14px; font-weight: 600; line-height: 1.2; max-width: 100%;
+}
+.cc-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-chip-x {
+  border: 0; background: rgba(0,0,0,.18); color: #0d0d0d;
+  width: 22px; height: 22px; min-width: 22px; border-radius: 50%;
+  font-size: 15px; line-height: 1; cursor: pointer; padding: 0;
+}
+.cc-chip-x:hover { background: rgba(0,0,0,.32); }
+.cc-chip-x:disabled { opacity: .5; cursor: default; }
+
 /* cloud275 - the "already submitted" state, made prominent + clean (was a faint gold note) */
 .meta-submitted { color: var(--success); font-weight: 600; }
 .submitted-banner {
