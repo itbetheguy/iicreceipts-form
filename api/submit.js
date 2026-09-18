@@ -80,6 +80,11 @@ module.exports = async function handler(req, res) {
       store:       f.store       || "",
       store_code:  f.store_code  || "",
       store_kind:  f.store_kind  || "",
+      /* t424 - his "field called category": the label the cardholder picked from the admin's
+         list (the app turns it into a GL code; the codes never come through here). An empty
+         string when none - an app build that doesn't read `category` books the submission
+         exactly as before. */
+      category:    f.category    || "",
       description: f.description || "",
       submitted_at: new Date().toISOString(),
       file_count:  files.length,
@@ -123,6 +128,12 @@ module.exports = async function handler(req, res) {
           return res.status(400).json({ error: "Please choose which store (or company) this charge is for." });
         if (reqs.require_description && !String(f.description || "").trim())
           return res.status(400).json({ error: "Please add a short description — accounting needs it to book the charge." });
+        /* t424 - "this should be a mandatory field": the same server-side backstop the store and
+           description have. Only the PRESENCE is checked here - whether the label is on the list is
+           the client's job (a plain-box submission during an endpoint blip must still land; the app's
+           reader tolerates a label it doesn't know). */
+        if (reqs.require_category && !String(f.category || "").trim())
+          return res.status(400).json({ error: "Category is required." });
       }
     }
 
@@ -223,7 +234,11 @@ async function fetchRequirements() {
     clearTimeout(tm);
     const j = await r.json();
     if (j && j.ok === true) {
-      return { require_store: !!j.require_store, require_description: !!j.require_description };
+      // t424 - require_category is only honored when the endpoint actually has a category list;
+      // an older app build sends neither, so nothing new is ever demanded of an older form.
+      const hasCats = Array.isArray(j.category_options) && j.category_options.length > 0;
+      return { require_store: !!j.require_store, require_description: !!j.require_description,
+        require_category: hasCats && j.require_category !== false };
     }
   } catch (_) {}
   return null;

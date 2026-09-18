@@ -37,7 +37,8 @@
     || "https://iicorp-ip.vercel.app/api/cc-submission-status";
   const FILE_URL = window.CC_FILE_URL
     || "https://iicorp-ip.vercel.app/api/cc-submission-file";
-  const REQUIRED = { store: false, description: false, photo: true };   // cloud274 #20 - photo default on
+  // t424 - category joins the map; it only turns required when the endpoint hands over a list
+  const REQUIRED = { store: false, category: false, description: false, photo: true };   // cloud274 #20 - photo default on
 
   function markRequired(fieldId) {
     const label = document.querySelector('label[for="' + fieldId + '"]');
@@ -69,12 +70,34 @@
     }
     return null;
   }
-  async function upgradeStoreField() {
+  /* t424 - ONE config pass. The options endpoint answers for the store list, the category list,
+     the require flags and the hints together, so every field reads the same answer. Each field's
+     upgrade is its own function: the store's early returns ("free" mode, no stores configured)
+     used to be the whole pass, and they must never skip the category. The never-go-down rule
+     holds throughout: no answer = every box stays a plain text box, nothing required beyond the
+     photo default, and the category box says the list is unavailable. */
+  async function loadFormConfig() {
     const cfg = await _fetchJsonRetry(OPTIONS_URL, 3, 7000);
-    if (!cfg || cfg.ok !== true) return;
+    if (!cfg || cfg.ok !== true) { upgradeCategoryField(null, true); return; }
     if (cfg.require_description) { REQUIRED.description = true; markRequired("description"); }
     if (cfg.require_store) { REQUIRED.store = true; markRequired("store"); }
     if (cfg.require_photo === false) REQUIRED.photo = false;   // cloud274 #20 - honor the admin's toggle
+    /* t424 - "then description can be optional": it is, unless the admin ticks it (the flag above);
+       the label already reads "(optional)". Its small print rides in like the store's. */
+    if (cfg.description_hint) hintUnder($("description"), String(cfg.description_hint));
+    upgradeCategoryField(cfg);
+    upgradeStoreField(cfg);
+  }
+  // small print under a field, the way store_hint has always been shown
+  function hintUnder(el, text) {
+    if (!el || !text) return;
+    const hint = document.createElement("div");
+    hint.className = "opt";
+    hint.style.marginTop = "4px";
+    hint.textContent = text;
+    el.insertAdjacentElement("afterend", hint);
+  }
+  function upgradeStoreField(cfg) {
     // cloud252 - if the admin set the Store field to free text, keep the plain box
     // even when options exist
     if (cfg.store_field_type === "free") return;
@@ -171,7 +194,10 @@
           gs.className = "cc-combo-ghost"; gs.textContent = " — " + g; row.appendChild(gs); }
         row.addEventListener("mousedown", (e) => { e.preventDefault();
           addChoice(o);
-          renderPanel();   // keep the list open so the next store is one click away
+          /* t424 - the list closes after a pick: it used to stay open and, with the Category box right under
+             it, the next tap (meant for Category) added a second store and split the charge. Type again or tap
+             the box to pick another ("i can continue to type JIB 765 and i can choose 765"). */
+          panel.style.display = "none";
         });
         panel.appendChild(row);
       });
@@ -192,10 +218,122 @@
       input.insertAdjacentElement("afterend", hint);
     }
   }
-  // Sequenced on purpose: the dropdown must exist (or have declined to) BEFORE
-  // the remembered store is prefolded, or the prefill silently no-ops against a
-  // SELECT that has no matching option.
-  upgradeStoreField().then(showPreviousSubmissions);
+  /* t424 - THE RANKING. This is the app's api/_cc-category.js, copied VERBATIM: the app and the
+     form must rank a query identically, so nothing here is ever "improved" on its own. Scores,
+     best first: whole label (100) > label starts with it (90) > a word starts with it (80) >
+     appears anywhere (70) > every typed word appears (60) > the letters appear in order (50) >
+     one typo off a word (40) > two typos (30). Ties: shorter label, then the admin's order. */
+  function normCat(s){return String(s==null?"":s).toLowerCase().replace(/&/g," and ").replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ").trim();}
+  function isSubsequence(q,s){let i=0;for(let j=0;j<s.length&&i<q.length;j++)if(s[j]===q[i])i++;return i===q.length;}
+  function levDist(a,b,cap){const la=a.length,lb=b.length,max=(cap==null?2:cap)+1;if(Math.abs(la-lb)>cap)return max;let prev=new Array(lb+1),cur=new Array(lb+1);for(let j=0;j<=lb;j++)prev[j]=j;for(let i=1;i<=la;i++){cur[0]=i;let rowMin=cur[0];for(let j=1;j<=lb;j++){cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));if(cur[j]<rowMin)rowMin=cur[j];}if(rowMin>cap)return max;const t=prev;prev=cur;cur=t;}return Math.min(prev[lb],max);}
+  function wordDist(q,w,cap){const whole=levDist(q,w,cap);const head=w.length>q.length?levDist(q,w.slice(0,q.length),cap):whole;return Math.min(whole,head);}
+  function scoreOne(qn,label){const ln=normCat(label);if(!qn||!ln)return 0;if(ln===qn)return 100;if(ln.indexOf(qn)===0)return 90;const words=ln.split(" ");if(words.some(w=>w.indexOf(qn)===0))return 80;if(ln.indexOf(qn)>=0)return 70;const qws=qn.split(" ").filter(Boolean);if(qws.length>1&&qws.every(w=>ln.indexOf(w)>=0))return 60;const q1=qn.replace(/ /g,"");if(q1.length>=5&&words.some(w=>w[0]===q1[0])&&isSubsequence(q1,ln.replace(/ /g,"")))return 50;if(q1.length>=4&&words.some(w=>w.length>=4&&wordDist(q1,w,1)<=1))return 40;if(q1.length>=5&&words.some(w=>w.length>=5&&wordDist(q1,w,2)<=2))return 30;return 0;}
+  function rankCategories(query,options){const qn=normCat(query);const list=(Array.isArray(options)?options:[]).filter(o=>o&&String(o.label||"").trim());if(!qn)return list.map((o,i)=>({option:o,score:0,i}));return list.map((o,i)=>({option:o,score:scoreOne(qn,o.label),i})).filter(x=>x.score>0).sort((a,b)=>(b.score-a.score)||(String(a.option.label).length-String(b.option.label).length)||(a.i-b.i));}
+  function findCategory(label,options){const n=normCat(label);if(!n)return null;return(Array.isArray(options)?options:[]).find(o=>o&&normCat(o.label)===n)||null;}
+  window.__CAT_RANK = rankCategories;   // a test page can drive the ranking directly
+  window.__CAT_OPTS = [];               // the list the endpoint handed over (empty = plain box)
+
+  /* t424 - HIS ASK: "I need the form to have a field called category. i will give you a list of
+     items that will translate over to gl codes. this should be a mandatory field. then description
+     can be optional." … "the category field should be a little smarter. i will need to type
+     something and see stuff that relates as close as it is. ranked from closest relating to least.
+     its gotta be smart since therell be more than ten i assume. Needs to be locked and not free
+     characters." … "again, all fields with a drop down should be auto fillable."
+     So: a LOCKED search box. Typing ranks the admin's list closest-first (the ranking above); the
+     highlighted row (first by default, arrows move it) picks on Enter, or click any row; a pick
+     fills the box with the label and stamps it as picked; typing again un-picks. Empty and focused
+     shows the whole list, so it is a plain dropdown too. Nothing but a label from the list is ever
+     submitted. The GL codes never leave the app - the form only sees labels.
+     THE NEVER-GO-DOWN RULE: no list (endpoint down, or nothing configured yet) = a plain OPTIONAL
+     text box that says so. The form never blocks a receipt because the app is away. */
+  function upgradeCategoryField(cfg, unreachable) {
+    const input = $("category");
+    if (!input || input.tagName !== "INPUT") return;
+    const options = (cfg && Array.isArray(cfg.category_options) ? cfg.category_options : [])
+      .filter((o) => o && String(o.label || "").trim())
+      .map((o) => ({ label: String(o.label).trim() }));
+    window.__CAT_OPTS = options;
+    if (!options.length) {
+      /* plain box, optional - the never-go-down rule. Two different truths: the list could not be reached
+         (say so, and ask for it typed - the app may still require one when it checks the submission), or
+         the admin simply has no categories yet (nothing to say; an optional box). */
+      if (unreachable) hintUnder(input, "The category list couldn\u2019t be loaded right now \u2014 type the category in.");
+      return;
+    }
+    // the endpoint's default is "required whenever there is a list"; only an explicit false relaxes it
+    if (cfg.require_category !== false) { REQUIRED.category = true; markRequired("category"); }
+    input.placeholder = "Type to search categories…";
+    input.setAttribute("autocomplete", "off");
+    const wrap = document.createElement("div");
+    wrap.className = "cc-combo";
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    const panel = document.createElement("div");
+    panel.className = "cc-combo-panel";
+    wrap.appendChild(panel);
+    if (cfg.category_hint) hintUnder(wrap, String(cfg.category_hint));
+    let rows = [];     // the ranked options on screen, top to bottom
+    let hl = 0;        // the highlighted row (keyboard), first by default
+    function closePanel() { panel.style.display = "none"; rows = []; }
+    function pick(o) {
+      if (!o) return;
+      input.value = o.label;
+      input.dataset.picked = o.label;
+      closePanel();
+    }
+    // the "already submitted" prefill goes through the same pick, so it stays locked to the list
+    window.__CAT_PICK = function (label) { const o = findCategory(label, options); if (o) pick(o); return !!o; };
+    function paintHl() {
+      Array.from(panel.children).forEach((r, i) => r.classList.toggle("cc-combo-hl", i === hl));
+    }
+    function renderPanel() {
+      panel.innerHTML = "";
+      rows = rankCategories(input.value, options).slice(0, 12).map((x) => x.option);   // closest first, 12 rows
+      if (!rows.length) { closePanel(); return; }
+      hl = 0;
+      rows.forEach((o, i) => {
+        const row = document.createElement("div");
+        row.className = "cc-combo-opt";
+        const main = document.createElement("span");
+        main.className = "cc-combo-main"; main.textContent = o.label;
+        row.appendChild(main);
+        row.addEventListener("mouseenter", () => { hl = i; paintHl(); });
+        row.addEventListener("mousedown", (e) => { e.preventDefault(); pick(o); });
+        panel.appendChild(row);
+      });
+      paintHl();
+      panel.style.display = "block";
+    }
+    input.addEventListener("focus", renderPanel);
+    input.addEventListener("input", () => { delete input.dataset.picked; renderPanel(); });
+    input.addEventListener("keydown", (e) => {
+      const open = panel.style.display === "block" && rows.length > 0;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (!open) { renderPanel(); return; }
+        hl = (hl + (e.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length;
+        paintHl();
+        const r = panel.children[hl];
+        if (r && r.scrollIntoView) r.scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (open) pick(rows[hl]);
+        else { const o = findCategory(input.value, options); if (o) pick(o); }
+      } else if (e.key === "Escape") {
+        closePanel();
+      }
+    });
+    input.addEventListener("blur", () => {
+      // typed the whole label by hand (case / punctuation don't matter)? that counts as a pick
+      if (!input.dataset.picked) { const o = findCategory(input.value, options); if (o) pick(o); }
+      setTimeout(closePanel, 150);
+    });
+  }
+
+  // Sequenced on purpose: the dropdowns must exist (or have declined to) BEFORE
+  // the remembered store / category are prefilled, or the prefill silently no-ops
+  // against a list that isn't there yet.
+  loadFormConfig().then(showPreviousSubmissions);
 
   // THE LINK REMEMBERS. Each link shows what has already been submitted for its
   // charge - so "did my first one go through?" is answered on the page instead of
@@ -279,6 +417,15 @@
       } else if (sEl && !sEl.value && !window.__STORE_LOCKED) {
         sEl.value = st.store;
       }
+    }
+    /* t424 - the remembered category comes back as a PICK (the dropdown's own pick function), so
+       an update keeps it locked to the list; a label no longer on the list is left alone rather
+       than typed in where it would be refused. With no list (plain box) the text is simply set.
+       A previous submission that carries no category does nothing. */
+    if (st.category) {
+      const cEl = $("category");
+      if (window.__CAT_PICK) window.__CAT_PICK(String(st.category));
+      else if (cEl && !cEl.value) cEl.value = String(st.category);
     }
     if (st.description) {
       const dEl = $("description");
@@ -481,6 +628,30 @@
         : "Please choose which store (or company) this charge is for.", "error");
       return;
     }
+    /* t424 - the category is LOCKED to the admin's list: only a label from it is ever sent
+       ("Needs to be locked and not free characters"). A pick, or a hand-typed label that equals
+       one (case / punctuation-blind), counts; anything else is refused and the box gets focus.
+       With no list on this device (endpoint down / nothing configured) the box is plain and
+       optional and whatever was typed rides along - the never-go-down rule. */
+    const catEl = $("category");
+    const typedCat = catEl ? catEl.value.trim() : "";
+    let category = typedCat;
+    const catOpts = window.__CAT_OPTS || [];
+    if (catOpts.length) {
+      const picked = (catEl && catEl.dataset && catEl.dataset.picked) || "";
+      const match = findCategory(typedCat, catOpts);
+      category = (picked && normCat(picked) === normCat(typedCat)) ? picked : (match ? match.label : "");
+      if (typedCat && !category) {
+        setStatus("Pick a category from the list.", "error");
+        if (catEl) catEl.focus();
+        return;
+      }
+    }
+    if (REQUIRED.category && !category) {
+      setStatus("Category is required.", "error");
+      if (catEl) catEl.focus();
+      return;
+    }
     if (REQUIRED.description && !description) {
       setStatus("Please add a short description - accounting needs it to book the charge.", "error");
       return;
@@ -515,6 +686,9 @@
        app that doesn't know about `stores` yet still books the submission correctly. */
     if (chosenStores.length) fd.append("stores", JSON.stringify(chosenStores.map((c) => ({
       store: c.label, code: c.code || "", kind: c.kind || "" }))));
+    /* t424 - the picked category label (empty when none). Rides ALONGSIDE every field above, so an
+       app build that doesn't know `category` yet still books the submission unchanged. */
+    fd.append("category", category);
     fd.append("description", description);
     files.forEach((f) => fd.append("files", f, f.name));
 
@@ -620,6 +794,7 @@
     $("store").disabled = disabled;
     // cloud402 - the chip × buttons are part of the form, so they lock with it
     document.querySelectorAll(".cc-chip-x").forEach((b) => { b.disabled = disabled; });
+    if ($("category")) $("category").disabled = disabled;   // t424
     $("description").disabled = disabled;
   }
 

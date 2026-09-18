@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Submit Receipt — IIC</title>
-  <link rel="stylesheet" href="/upload.css?v=t402">
+  <link rel="stylesheet" href="/upload.css?v=t424">
 </head>
 <body>
   <main class="card" id="card">
@@ -30,6 +30,14 @@
       <div class="field">
         <label for="store">Store / location <span class="opt">(optional)</span></label>
         <input id="store" name="store" type="text" autocomplete="off" placeholder="e.g. JIB 3640">
+      </div>
+
+      <!-- t424 - his "field called category": a locked search box fed by the admin's list
+           (upload.js ranks it closest-first as they type). Stays a plain optional box when
+           the list can't be reached - the form never goes down. -->
+      <div class="field">
+        <label for="category">Category <span class="opt">(optional)</span></label>
+        <input id="category" name="category" type="text" autocomplete="off" placeholder="What kind of expense?">
       </div>
 
       <div class="field">
@@ -63,6 +71,6 @@
     </section>
   </main>
 
-  <script src="/upload.js?v=t402"></script>
+  <script src="/upload.js?v=t424"></script>
 </body>
 </html>

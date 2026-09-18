@@ -17,7 +17,7 @@ The main app lives in `../live/`. Its side of this story is documented in
 | File | What it does |
 |---|---|
 | `index.html` | The whole page. Two `?v=` cache tags near the bottom — **bump BOTH** on any change to `upload.js` or `upload.css`, or nobody receives it. |
-| `upload.js` | All the client logic: reads the charge out of the URL, renders the store picker, validates, submits. |
+| `upload.js` | All the client logic: reads the charge out of the URL, renders the store picker and the category search box, validates, submits. |
 | `upload.css` | Styling. |
 | `api/submit.js` | The one endpoint. Emails the submission (fields as JSON + the files) **from** the tracker's Gmail **to** `TO_ADDRESS`. |
 
@@ -30,7 +30,7 @@ the main app's mailbox scan reads it back:
 
 ```
 cardholder opens the link
-   → picks store(s), types a description, attaches a photo/PDF
+   → picks store(s), picks a category, types a description (optional), attaches a photo/PDF
    → api/submit.js emails it FROM the tracker gmail TO cc@iicorp.org
    → that gmail keeps a copy in [Gmail]/Sent Mail
    → the main app's scan reads Sent Mail and attaches the receipt to its charge
@@ -72,6 +72,39 @@ across them** by the app. The submission carries both shapes at once — `stores
 
 **If the options endpoint fails for any reason, the field falls back to the plain text box and the
 form still submits.** Never let a decoration break the submission — that is the uptime rule.
+
+## The category field (t424)
+
+His words: *"I need the form to have a field called category. i will give you a list of items that
+will translate over to gl codes. this should be a mandatory field. then description can be
+optional."* The list lives in the app; the form only ever sees **labels** — the GL codes never
+leave the app.
+
+It is a **locked search box**: typing ranks the admin's list closest-first (whole label, then
+"starts with", then a word starts with it, then "appears anywhere", then typo-tolerant — the
+ranking is the app's `api/_cc-category.js` copied verbatim into `upload.js`, so both sides agree),
+arrows move the highlight, Enter or a click picks, and only a label from the list is ever
+submitted (a typed non-label is refused with *"Pick a category from the list."*). Empty and
+focused, it shows the whole list, so it is a plain dropdown too. Required whenever the endpoint
+hands over a list, unless the admin unticks it.
+
+**Never-go-down rule, again:** with no list (endpoint down, or nothing configured yet) it is a
+plain, **optional** text box that says so, and the submission goes through. Description is
+optional unless the admin ticks it.
+
+### What `/api/cc-form-options` sends this form
+
+| Field | Meaning |
+|---|---|
+| `options`, `store_field_type`, `store_hint`, `require_store` | the store field (above) |
+| `category_options` | `[{ label }]`, labels only, in the admin's order |
+| `require_category` | default `true` when the list is non-empty |
+| `category_hint` | small print under the category field (may be `""`) |
+| `require_description`, `description_hint` | description is optional unless ticked; its small print |
+| `require_photo` | photo required on a first visit unless `false` |
+
+The submission carries `category` (the picked label, or `""`) alongside everything else — never
+instead of anything.
 
 ---
 

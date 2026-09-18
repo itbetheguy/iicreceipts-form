@@ -346,6 +346,10 @@ button:disabled {
 .cc-combo-main { font-weight: 600; }
 .cc-combo-ghost { color: var(--text-faint); font-weight: 400; }
 .cc-combo-opt:hover .cc-combo-ghost { color: #0d0d0d; opacity: .75; }
+/* t424 - the category search box moves a highlight with the arrow keys (Enter picks it);
+   the highlighted row wears the same gold as a hovered one */
+.cc-combo-opt.cc-combo-hl { background: var(--accent); color: #0d0d0d; }
+.cc-combo-opt.cc-combo-hl .cc-combo-ghost { color: #0d0d0d; opacity: .75; }
 
 /* cloud402 - SEVERAL stores on one charge: each pick becomes a chip above the search box
    ("i click it and i can continue to type JIB 765 and i can choose 765"). Big enough to tap. */
