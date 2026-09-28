@@ -46,6 +46,24 @@ join key. Adding fields is safe; removing or renaming these is not.
 
 ---
 
+## Big uploads (t471) - the 4.5 MB ceiling
+
+Vercel refuses a request body over **4.5 MB** before `api/submit.js` ever runs, so the old form - one request
+carrying every file - failed outright on a couple of phone photos, with a blank "Submission failed:" (the server's
+24 MB limit in `submit.js` was never reachable). Since t471 `upload.js`:
+- **shrinks photos** in the browser first (`shrinkPhoto`: long side 2000 px, JPEG 0.85, the right way up; a file it
+  can't read, a PDF, or a photo already under 900 KB goes as it is);
+- **sends in parts** (`packSends`, `SEND_LIMIT` = 3.9 MB of files per request, in the order picked); every part is
+  a normal submission on the same link - same fields, its own email - and the app files them all on the charge;
+- **refuses by name** a single file still over the limit, before anything is sent (`tooBigMessage`);
+- when a part fails, **says what went** ("Part 1 of 2 WAS sent (1 file). The next part didn't go - …") and a second
+  press sends **only what didn't** (`SENT_FILES`);
+- **never shows a blank reason** (`failMessage`: the server's words, else "error <status>") and **scrolls the
+  message into view** - on a phone it sits under three buttons.
+Tests: `live/tests/cc_waiting_test.js` §4. The done screen after several parts says how many went.
+
+---
+
 ## The URL contract
 
 The app builds these links (`_ccSubmissionLink` in `app.js`). `upload.js` reads:

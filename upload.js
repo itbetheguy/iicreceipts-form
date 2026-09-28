@@ -599,6 +599,71 @@
     $("fraud-btn").disabled = d;
   }
 
+  /* t471 - WHAT ONE SEND CAN CARRY. The form runs on Vercel, which refuses a request body over 4.5 MB
+     BEFORE the form's own code ever sees it - the cardholder got a bare "Submission failed:" and could walk
+     away believing it went (his words after Chris's "I already submitted these": "make sure its robust and
+     ACTUALLY lands ... theres no way for it to magically get lost"). A phone photo alone is 3-12 MB. So:
+     photos are shrunk here first (a receipt reads fine at 2000 px), the files go in as many parts as they
+     need - each part is its own submission on this link and the tracker puts every one on the charge - a
+     single file still too big is refused BY NAME before anything is sent, and a failure says exactly what
+     did and didn't go. Pressing Submit again sends only what didn't. */
+  const SEND_LIMIT = Math.floor(3.9 * 1024 * 1024);   // file bytes per request: the fields + the multipart wrapping stay under 4.5 MB
+  const SENT_FILES = new Set();                       // files an earlier part of this submission already delivered
+  function fileKey(f) { return [f && f.name, f && f.size, f && f.lastModified].join("|"); }
+  // greedy, in the order picked: [[0,1],[2],...]. A file over the limit sits alone (the caller refuses it).
+  function packSends(sizes, limit) {
+    const out = []; let cur = [], tot = 0;
+    sizes.forEach((sz, i) => {
+      if (cur.length && tot + sz > limit) { out.push(cur); cur = []; tot = 0; }
+      cur.push(i); tot += sz;
+    });
+    if (cur.length) out.push(cur);
+    return out;
+  }
+  function tooBigMessage(name, bytes, limit) {
+    const mb = (b) => (b / 1048576).toFixed(1);
+    return "\u201C" + name + "\u201D is " + mb(bytes) + " MB - the form can send about " + mb(limit) + " MB at a time, so nothing was sent. "
+      + "Take a photo of the receipt instead, or save the PDF smaller, then press Submit again.";
+  }
+  function failMessage(status, data, statusText, somethingWent) {
+    const tail = somethingWent ? " Press Submit again - only what didn't go is sent." : " Nothing was sent - press Submit again.";
+    const dot = (t) => (/[.!?]$/.test(t) ? t : t + ".");
+    if (data && data.error) return "Submission failed: " + dot(String(data.error)) + tail;
+    if (status === 413) return "Submission failed: the files were too big to send in one go." + tail;
+    return "Submission failed (error " + (status || "?") + (statusText ? " " + statusText : "") + ")." + tail;
+  }
+  function partSaid(sentParts, total, sentFiles) {
+    if (!sentParts) return "";
+    return (sentParts === 1 ? "Part 1 of " + total + " WAS sent" : "Parts 1-" + sentParts + " of " + total + " WERE sent")
+      + " (" + sentFiles + " file" + (sentFiles === 1 ? "" : "s") + "). The next part didn't go - ";
+  }
+  // a photo shrunk to what a receipt needs; anything that can't be read here goes as it was taken
+  async function shrinkPhoto(file) {
+    try {
+      if (!file || !/^image\//i.test(file.type || "") || /gif|svg/i.test(file.type || "")) return file;
+      if (file.size <= 900 * 1024) return file;   // already small - send it as taken
+      let src = null, w = 0, h = 0, url = "";
+      try { src = await createImageBitmap(file, { imageOrientation: "from-image" }); w = src.width; h = src.height; }
+      catch (_) {
+        url = URL.createObjectURL(file);
+        src = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url; });
+        w = src.naturalWidth; h = src.naturalHeight;
+      }
+      if (!w || !h) return file;
+      const k = Math.min(1, 2000 / Math.max(w, h));
+      const W = Math.max(1, Math.round(w * k)), H = Math.max(1, Math.round(h * k));
+      const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+      const ctx = cv.getContext("2d");
+      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(src, 0, 0, W, H);
+      if (url) setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 1000);
+      const blob = await new Promise((res) => cv.toBlob(res, "image/jpeg", 0.85));
+      if (!blob || blob.size >= file.size) return file;
+      const base = String(file.name || "receipt").replace(/\.[^.]+$/, "") || "receipt";
+      return new File([blob], base + ".jpg", { type: "image/jpeg", lastModified: file.lastModified || Date.now() });
+    } catch (_) { return file; }   // any trouble: the original goes, and the size check decides
+  }
+
   async function submitReceipt(_unused) {
     const files = Array.from(filesInput.files || []);
     // First-time submission: at least one file is required. Update
@@ -673,48 +738,75 @@
       if (_match) { storeCode = _match.code || ""; storeKind = _match.kind || ""; }
     }
 
-    const fd = new FormData();
-    fd.append("token", token);
-    fd.append("cardholder", cardholder);
-    fd.append("vendor", vendor);
-    fd.append("amount", amount);
-    fd.append("date", date);
-    fd.append("store", store);
-    fd.append("store_code", storeCode);
-    fd.append("store_kind", storeKind);
-    /* cloud402 - the full list rides ALONGSIDE the fields above, never instead of them, so an
-       app that doesn't know about `stores` yet still books the submission correctly. */
-    if (chosenStores.length) fd.append("stores", JSON.stringify(chosenStores.map((c) => ({
-      store: c.label, code: c.code || "", kind: c.kind || "" }))));
-    /* t424 - the picked category label (empty when none). Rides ALONGSIDE every field above, so an
-       app build that doesn't know `category` yet still books the submission unchanged. */
-    fd.append("category", category);
-    fd.append("description", description);
-    files.forEach((f) => fd.append("files", f, f.name));
+    /* t471 - the fields ride on EVERY part of a submission, exactly as they always have */
+    const makeFd = () => {
+      const fd = new FormData();
+      fd.append("token", token);
+      fd.append("cardholder", cardholder);
+      fd.append("vendor", vendor);
+      fd.append("amount", amount);
+      fd.append("date", date);
+      fd.append("store", store);
+      fd.append("store_code", storeCode);
+      fd.append("store_kind", storeKind);
+      /* cloud402 - the full list rides ALONGSIDE the fields above, never instead of them, so an
+         app that doesn't know about `stores` yet still books the submission correctly. */
+      if (chosenStores.length) fd.append("stores", JSON.stringify(chosenStores.map((c) => ({
+        store: c.label, code: c.code || "", kind: c.kind || "" }))));
+      /* t424 - the picked category label (empty when none). Rides ALONGSIDE every field above, so an
+         app build that doesn't know `category` yet still books the submission unchanged. */
+      fd.append("category", category);
+      fd.append("description", description);
+      return fd;
+    };
 
-    setStatus(isUpdateMode ? "Sending update…" : "Submitting…", "info");
     disableForm(true);
-
-    try {
-      const res = await fetch("/api/submit", { method: "POST", body: fd });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setStatus(`Submission failed: ${data.error || res.statusText}`, "error");
+    // t471 - shrink, pack into parts that fit, refuse by name what can't fit (see SEND_LIMIT)
+    setStatus(files.length ? "Getting your files ready…" : (isUpdateMode ? "Sending update…" : "Submitting…"), "info");
+    const ready = [];
+    for (const f of files) ready.push({ orig: f, file: await shrinkPhoto(f) });
+    const todo = ready.filter((x) => !SENT_FILES.has(fileKey(x.orig)));   // a retry sends only what didn't go
+    const big = todo.find((x) => x.file.size > SEND_LIMIT);
+    if (big) {
+      setStatus(tooBigMessage(big.orig.name || big.file.name || "That file", big.file.size, SEND_LIMIT), "error");
+      disableForm(false);
+      return;
+    }
+    const parts = todo.length ? packSends(todo.map((x) => x.file.size), SEND_LIMIT) : [[]];
+    let sentParts = 0, sentFiles = 0;
+    for (let pi = 0; pi < parts.length; pi++) {
+      const fd = makeFd();
+      parts[pi].forEach((ix) => fd.append("files", todo[ix].file, todo[ix].file.name));
+      setStatus(parts.length > 1 ? "Sending part " + (pi + 1) + " of " + parts.length + "…" : (isUpdateMode ? "Sending update…" : "Submitting…"), "info");
+      let res = null, data = {};
+      try {
+        res = await fetch("/api/submit", { method: "POST", body: fd });
+        data = await res.json().catch(() => ({}));
+      } catch (err) {
+        setStatus(partSaid(sentParts, parts.length, sentFiles) + "Couldn't reach the form's server (" + ((err && err.message) || err) + ")."
+          + (sentParts ? " Press Submit again - only what didn't go is sent." : " Nothing was sent - check the connection and press Submit again."), "error");
         disableForm(false);
         return;
       }
+      if (!res.ok) {
+        setStatus(partSaid(sentParts, parts.length, sentFiles) + failMessage(res.status, data, res.statusText, sentParts > 0), "error");
+        disableForm(false);
+        return;
+      }
+      sentParts++;
+      sentFiles += parts[pi].length;
+      parts[pi].forEach((ix) => SENT_FILES.add(fileKey(todo[ix].orig)));
       // Mark this token as submitted on this device so the next visit
       // shows the update banner. Wrapped in try since some browsers
       // block localStorage in incognito.
       try { localStorage.setItem(SUBMITTED_KEY, new Date().toISOString()); } catch (_) {}
-      if (isUpdateMode) {
-        showDone("Update received", "Thanks. Your changes have been recorded.");
-      } else {
-        showDone();
-      }
-    } catch (err) {
-      setStatus(`Network error: ${err.message || err}`, "error");
-      disableForm(false);
+    }
+    if (isUpdateMode) {
+      showDone("Update received", "Thanks. Your changes have been recorded.");
+    } else if (parts.length > 1) {
+      showDone(null, "Thanks. Your " + sentFiles + " files went in " + parts.length + " parts - every one reached the accounting team.");
+    } else {
+      showDone();
     }
   }
 
@@ -729,7 +821,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setStatus(`Couldn't mark it: ${data.error || res.statusText}`, "error");
+        setStatus("Couldn't mark it: " + (data.error || ("error " + res.status + (res.statusText ? " " + res.statusText : ""))) + " - nothing was changed. Try again.", "error");   // t471 - never a blank reason
         disableForm(false);
         return;
       }
@@ -763,7 +855,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setStatus(`Report failed: ${data.error || res.statusText}`, "error");
+        setStatus("Report failed: " + (data.error || ("error " + res.status + (res.statusText ? " " + res.statusText : ""))) + " - nothing was sent. Try again.", "error");   // t471 - never a blank reason
         disableForm(false);
         return;
       }
@@ -784,6 +876,9 @@
     el.textContent = msg;
     el.className = "status " + (kind || "");
     el.hidden = false;
+    /* t471 - on a phone this line sits under three buttons, off the screen: bring it into view, so a failure is
+       never something that happened out of sight (the "I thought it went" the whole t471 build is about) */
+    try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {}
   }
 
   function disableForm(disabled) {
