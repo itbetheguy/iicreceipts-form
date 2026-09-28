@@ -288,7 +288,7 @@
     }
     function renderPanel() {
       panel.innerHTML = "";
-      rows = rankCategories(input.value, options).slice(0, 12).map((x) => x.option);   // closest first, 12 rows
+      rows = rankCategories(input.value, options).map((x) => x.option);   // t470 - EVERY category, closest first (the panel scrolls): a 12-row cap hid 35 of his 47
       if (!rows.length) { closePanel(); return; }
       hl = 0;
       rows.forEach((o, i) => {
