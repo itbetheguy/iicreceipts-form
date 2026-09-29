@@ -175,3 +175,15 @@ The safe sequence is always: **ship the tolerant reader first, the new writer se
 **A push here can silently fail to trigger a Vercel deploy.** After pushing, check that the
 deployed page actually serves your change (the `?v=` tag is the quickest tell). If it did not
 fire, push a fresh commit.
+
+## Nothing is required once a receipt is on file (t473)
+
+His (9/29): *"when a submission is already there, i dont need any of the fields required pls."* The admin's settings
+(Settings → Credit Cards → Submissions: store / category / description required) decide a FIRST submission only. Once a
+receipt is on file — this device sent one, the link carries `?u=1`, or the tracker says it has the file(s) — every field
+reads **(optional)**, the button says **Submit update**, and nothing is asked for. `paintRequired()` is the one painter
+for the three labels (run after the settings load AND when update mode switches on, so neither order can leave
+"(required)" up); `updateModeFields()` is what both ways into update mode call. Still refused: a store typed that isn't
+on a locked list (a wrong value, not a missing one), and an update with no file and every box empty (it would send an
+email that changes nothing - "Nothing to update yet"). Safe because the tracker never blanks a field an update leaves
+empty (cc-admin.js: a photo-less update patches only the fields that came filled in).

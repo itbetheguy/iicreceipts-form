@@ -39,13 +39,23 @@
     || "https://iicorp-ip.vercel.app/api/cc-submission-file";
   // t424 - category joins the map; it only turns required when the endpoint hands over a list
   const REQUIRED = { store: false, category: false, description: false, photo: true };   // cloud274 #20 - photo default on
+  /* t473 - declared up here (it used to be declared further down) so every rule below can ask it, whatever order the
+     page's own answers arrive in. True once a receipt is already on file for this link: this device sent one, the
+     link says ?u=1, or the tracker says it has the file(s). */
+  let isUpdateMode = false;
 
-  function markRequired(fieldId) {
-    const label = document.querySelector('label[for="' + fieldId + '"]');
-    if (!label) return;
-    const opt = label.querySelector(".opt");
-    if (opt) opt.textContent = "(required)";
+  /* t473 - his (9/29): "when a submission is already there, i dont need any of the fields required pls." The admin's
+     settings (REQUIRED) decide a FIRST submission; once a receipt is on file nothing is required - an update sends only
+     what was filled in, and the tracker never blanks a field an update leaves empty. One painter for the three labels,
+     run after the settings load and again when update mode switches on, so neither order can leave "(required)" up. */
+  function paintRequired() {
+    [["store", "store"], ["category", "category"], ["description", "description"]].forEach(([k, id]) => {
+      const label = document.querySelector('label[for="' + id + '"]');
+      const opt = label && label.querySelector(".opt");
+      if (opt) opt.textContent = (REQUIRED[k] && !isUpdateMode) ? "(required)" : "(optional)";
+    });
   }
+  function markRequired(_fieldId) { paintRequired(); }
 
   // cloud273 - the options endpoint is a serverless function; a COLD start (its first
   // hit after idle) can take several seconds, and the old single 4.5s attempt aborted
@@ -393,7 +403,7 @@
 
     const tail = document.createElement("div");
     tail.className = "submitted-tail";
-    tail.textContent = "Anything you send now is added to these \u2014 nothing gets replaced.";
+    tail.textContent = "Anything you send now is added to these \u2014 nothing gets replaced. Nothing is required now: add a file or change only what you need.";   // t473
     box.appendChild(tail);
 
     const bodyEl = document.getElementById("body") || document.body;
@@ -401,6 +411,7 @@
     // a receipt exists, so a new photo is optional - same as the localStorage
     // update mode, but now it works from ANY device
     isUpdateMode = true;
+    updateModeFields();   // t473 - and nothing else is required either (the labels + the button say so)
     if (st.store) {
       const sEl = $("store");
       /* cloud402 - rebuild the CHIPS from what was submitted before ("JIB 3640 + JIB 0765"),
@@ -447,7 +458,7 @@
   //  ?u=1                   → backend-controlled update-mode override
   const SUBMITTED_KEY = `cc_submitted_${token}`;
   const FRAUD_KEY     = `cc_fraud_${token}`;
-  let isUpdateMode  = false;
+  // (t473 - isUpdateMode is declared at the top now, beside REQUIRED)
   let isFraudLocked = false;
   try {
     if (localStorage.getItem(FRAUD_KEY)) isFraudLocked = true;
@@ -518,15 +529,21 @@
     banner.className = "update-banner";
     banner.innerHTML =
       '<div class="update-banner-title">✓ Receipt already submitted</div>' +
-      '<div class="update-banner-sub">Anything you change here will update your previous submission. Photo is now optional.</div>';
+      '<div class="update-banner-sub">Anything you change here will update your previous submission. Nothing is required now — fill in only what you want to change.</div>';   // t473
     const body = $("body");
     if (body && body.firstChild) body.insertBefore(banner, body.firstChild);
-    // Soften the file field label.
+    updateModeFields();
+  }
+  /* t473 - what update mode changes on the form, in ONE place: every field reads (optional), the file label says it adds
+     to the submission, the button says "Submit update". Both ways in call it - this device's own memory / ?u=1 at load
+     (above), and the tracker saying it already has the file(s) (showPreviousSubmissions) - so a link opened on another
+     device reads the same as one opened on the device that sent it. */
+  function updateModeFields() {
+    paintRequired();
     const fileLabel = document.querySelector('label[for="files"]');
     if (fileLabel) {
       fileLabel.innerHTML = 'Receipt photo(s) or PDF <span class="opt">(optional — adds to your submission)</span>';
     }
-    // Change submit button label to make intent clear.
     const submitBtn = $("submit-btn");
     if (submitBtn) submitBtn.textContent = "Submit update";
   }
@@ -829,7 +846,8 @@
       setStatus("Pick your store from the list — a typed name can't be used here.", "error", $("store"));
       return;
     }
-    if (REQUIRED.store && !store) {
+    // t473 - a receipt already on file: nothing is required (an update sends only what was filled in)
+    if (REQUIRED.store && !isUpdateMode && !store) {
       setStatus(lockedStores
         ? "Please pick your store from the list."
         : "Please choose which store (or company) this charge is for.", "error", $("store"));
@@ -853,12 +871,18 @@
         return;
       }
     }
-    if (REQUIRED.category && !category) {
+    if (REQUIRED.category && !isUpdateMode && !category) {
       setStatus("Category is required.", "error", catEl);
       return;
     }
-    if (REQUIRED.description && !description) {
+    if (REQUIRED.description && !isUpdateMode && !description) {
       setStatus("Please add a short description - accounting needs it to book the charge.", "error", $("description"));
+      return;
+    }
+    /* t473 - with nothing required, an update with no file AND every box empty would send an email that changes
+       nothing (the tracker only takes the fields that were filled in) and still say "sent". Say so instead. */
+    if (isUpdateMode && !files.length && !store && !category && !description) {
+      setStatus("Nothing to update yet - attach a receipt, or fill in the store, category or description you want to change.", "error");
       return;
     }
     // what the chosen option is LINKED TO: a specific store, or a whole company
