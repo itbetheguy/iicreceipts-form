@@ -97,7 +97,7 @@ The app builds these links (`_ccSubmissionLink` in `app.js`). `upload.js` reads:
 |---|---|
 | `token` | the charge id — pre-fill + submission history + the localStorage key |
 | `cardholder`, `vendor`, `amount`, `date` | shown on the page, and echoed back as the join key |
-| `u=1` | force "update" mode (for the cross-device case, where localStorage is empty) |
+| ~~`u=1`~~ | **ignored since t474** - it forced update mode on a charge with no submission yet; no link ever carried it, and the tracker's own "already has the file" answer covers the other-device case |
 
 ## The store field has three modes
 
@@ -180,10 +180,26 @@ fire, push a fresh commit.
 
 His (9/29): *"when a submission is already there, i dont need any of the fields required pls."* The admin's settings
 (Settings → Credit Cards → Submissions: store / category / description required) decide a FIRST submission only. Once a
-receipt is on file — this device sent one, the link carries `?u=1`, or the tracker says it has the file(s) — every field
+receipt is on file — this device sent one, or the tracker says it has the file(s) (t474: nothing else) — every field
 reads **(optional)**, the button says **Submit update**, and nothing is asked for. `paintRequired()` is the one painter
 for the three labels (run after the settings load AND when update mode switches on, so neither order can leave
 "(required)" up); `updateModeFields()` is what both ways into update mode call. Still refused: a store typed that isn't
 on a locked list (a wrong value, not a missing one), and an update with no file and every box empty (it would send an
 email that changes nothing - "Nothing to update yet"). Safe because the tracker never blanks a field an update leaves
 empty (cc-admin.js: a photo-less update patches only the fields that came filled in).
+
+## Optional ONLY after a real submission (t474)
+
+His (9/29): *"the form fields should only become optional when a submission has already happened. so on first submission,
+everything required stays required. if reloaded for an update, nothing should be REQUIRED, just optional so that i can
+change what i need accordingly."* Update mode (every field optional) now switches on for exactly two reasons:
+
+- **this device sent a receipt submission** — `localStorage cc_sent_<token>`, written only after a submission part went
+  through (`submitReceipt`); or
+- **the tracker already holds the charge's file(s)** — `cc-submission-status` answers `files`, from any device.
+
+Two holes closed: a **temporary-hold mark** used to write the "already submitted" key too (`cc_submitted_<token>`), so a
+device that had marked a hold opened the charge's FIRST receipt with every field optional — it writes nothing now, and the
+old key is no longer read (a receipt sent before this build is already in the tracker, which switches update mode on by
+itself). And **`?u=1`** no longer forces update mode (it could make a first submission optional; no link ever carried it).
+

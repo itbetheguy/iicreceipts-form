@@ -3,15 +3,14 @@
 // the multipart form to /api/submit.
 //
 // v2_120-fix8c: smart first-visit-vs-update mode.
-//   • First visit per device: photo upload REQUIRED (preserves the
-//     original purpose — actual receipt must arrive at least once).
-//   • Second+ visit on the same device (detected via localStorage with
-//     the token as the key): photo upload becomes OPTIONAL and a small
-//     gold banner says "Receipt already submitted — anything you change
-//     here will update your previous submission."
-//   • An optional ?u=1 URL param forces update mode regardless of
-//     localStorage state, so the backend can flip it via the reminder
-//     email URL if needed for the cross-device case.
+//   • First submission: everything the admin requires is REQUIRED (the photo
+//     at least - the actual receipt must arrive once).
+//   • t474 - UPDATE mode (nothing required - change only what you need) ONLY
+//     once a receipt submission has really happened: THIS device sent one
+//     (localStorage cc_sent_<token>), or the tracker already holds the
+//     charge's file(s) (cc-submission-status - any device). A temporary-hold
+//     mark is not a receipt submission and no longer counts, and the old
+//     ?u=1 switch (no link ever carried it) no longer forces it.
 
 (async function () {
   "use strict";
@@ -40,8 +39,10 @@
   // t424 - category joins the map; it only turns required when the endpoint hands over a list
   const REQUIRED = { store: false, category: false, description: false, photo: true };   // cloud274 #20 - photo default on
   /* t473 - declared up here (it used to be declared further down) so every rule below can ask it, whatever order the
-     page's own answers arrive in. True once a receipt is already on file for this link: this device sent one, the
-     link says ?u=1, or the tracker says it has the file(s). */
+     page's own answers arrive in. t474 - his "the form fields should only become optional when a submission has already
+     happened. so on first submission, everything required stays required. if reloaded for an update, nothing should be
+     REQUIRED": true ONLY once a receipt submission has really happened - this device sent one (cc_sent_<token>), or the
+     tracker says it has the file(s). Nothing else switches it on. */
   let isUpdateMode = false;
 
   /* t473 - his (9/29): "when a submission is already there, i dont need any of the fields required pls." The admin's
@@ -453,17 +454,19 @@
 
   // ─── Update-mode detection ─────────────────────────────────────────
   // localStorage flags are per-device.
-  //  cc_submitted_<token>   → previous successful receipt submission
+  //  cc_sent_<token>        → this device sent a receipt submission (t474)
   //  cc_fraud_<token>       → previous fraud report; form locks down
-  //  ?u=1                   → backend-controlled update-mode override
-  const SUBMITTED_KEY = `cc_submitted_${token}`;
+  /* t474 - a NEW key on purpose. The old cc_submitted_<token> was also written by a temporary-hold mark, so a device that
+     had marked a hold would open the charge's FIRST receipt submission with every field optional. That key is no longer
+     read (a receipt sent before this build is already in the tracker, which switches update mode on by itself); ?u=1 no
+     longer forces it either. */
+  const SUBMITTED_KEY = `cc_sent_${token}`;
   const FRAUD_KEY     = `cc_fraud_${token}`;
   // (t473 - isUpdateMode is declared at the top now, beside REQUIRED)
   let isFraudLocked = false;
   try {
     if (localStorage.getItem(FRAUD_KEY)) isFraudLocked = true;
-    if (params.get("u") === "1") isUpdateMode = true;
-    else if (localStorage.getItem(SUBMITTED_KEY)) isUpdateMode = true;
+    if (localStorage.getItem(SUBMITTED_KEY)) isUpdateMode = true;
   } catch (_) { /* localStorage blocked — stay in first-time mode */ }
 
   // Fraud lock short-circuits everything: show a locked-out screen and
@@ -535,9 +538,9 @@
     updateModeFields();
   }
   /* t473 - what update mode changes on the form, in ONE place: every field reads (optional), the file label says it adds
-     to the submission, the button says "Submit update". Both ways in call it - this device's own memory / ?u=1 at load
-     (above), and the tracker saying it already has the file(s) (showPreviousSubmissions) - so a link opened on another
-     device reads the same as one opened on the device that sent it. */
+     to the submission, the button says "Submit update". Both ways in call it - this device's own memory at load (above;
+     t474 - only a receipt it sent), and the tracker saying it already has the file(s) (showPreviousSubmissions) - so a
+     link opened on another device reads the same as one opened on the device that sent it. */
   function updateModeFields() {
     paintRequired();
     const fileLabel = document.querySelector('label[for="files"]');
@@ -968,8 +971,8 @@
       sentFiles += parts[pi].length;
       parts[pi].forEach((ix) => SENT_FILES.add(fileKey(todo[ix].orig)));
       // Mark this token as submitted on this device so the next visit
-      // shows the update banner. Wrapped in try since some browsers
-      // block localStorage in incognito.
+      // shows the update banner (t474 - the only thing that writes it: a receipt submission that went through).
+      // Wrapped in try since some browsers block localStorage in incognito.
       try { localStorage.setItem(SUBMITTED_KEY, new Date().toISOString()); } catch (_) {}
     }
     if (isUpdateMode) {
@@ -996,7 +999,8 @@
         disableForm(false);
         return;
       }
-      try { localStorage.setItem(SUBMITTED_KEY, new Date().toISOString()); } catch (_) {}
+      /* t474 - a temporary-hold mark is NOT a receipt submission: it no longer marks this device as "already submitted"
+         (it did, and the charge's first real receipt then came up with every field optional) */
       // cloud342 (audit) - only a still-pending charge becomes a temp hold. If the processor reports
       // it did NOT change (the charge already has a receipt or a decision on file), don't claim it
       // was marked - say so honestly instead of a false success.
