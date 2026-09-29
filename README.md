@@ -64,6 +64,31 @@ Tests: `live/tests/cc_waiting_test.js` §4. The done screen after several parts 
 
 ---
 
+## A rejection is a tile (t472) - and the email route, with a receipt code
+
+His words: "I don't like the notification of rejection being on the bottom of the field. Make it a an overlay tile
+saying why it failed and they can x it out to dismiss. And also put 'reply to email with the submission' with text.
+Make the close or x or dismissible button copy the text pastable automatically. Also say it copied automatically." +
+"The text pastable can be some sort of legible code the program can pick up on scan."
+- EVERY rejection is `showProblem` - a tile over the form with a title, why it failed, and an ✕ (the old line under
+  the buttons is hidden; progress - "Submitting…", "Sending part 2 of 3…" - still uses that line). `setStatus(msg,
+  "error", field)` routes there; closing a field-to-fix tile puts the cursor in that field.
+- When the FILE can't go through the form (too big, or the send failed / couldn't reach the server), the tile adds
+  "Send it by email instead": reply to the email that sent you this link, attach the file, paste this text - and shows
+  the text (`emailTextFor`): the charge's line, `Receipt code: IIC-XXXX-XXXX-XXXX` (`receiptCode(token)` - the first 12
+  hex digits of the charge id; an old desktop link's base64url token gives the same code), and the store / category /
+  description already filled in. With no code (an odd link) the link itself rides along.
+- The ✕, the "Copy the text & close" button and Escape all COPY that text (`copyText`: the clipboard, else the older
+  copy command), close the tile and say so ("✓ Copied automatically - paste it into your reply email"). A browser that
+  refuses to copy keeps the tile open, selects the text and says how; the next close closes.
+- The tracker's mailbox check reads the reply (the app's `api/_cc-parse.js` `parseReceiptReply`; docs §8d): the code
+  names the charge, so the file lands on it even when someone changes the subject or starts a new email.
+Tests: `live/tests/cc_waiting_test.js` §5 (and the round trip: the copied text read back by the app's reader),
+`live/tests/cc_reply_test.js` §1 (the code on both sides). Clicked through at phone size: too big, a field to fix, a
+failed send, a refused copy, Escape.
+
+---
+
 ## The URL contract
 
 The app builds these links (`_ccSubmissionLink` in `app.js`). `upload.js` reads:

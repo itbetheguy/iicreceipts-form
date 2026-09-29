@@ -623,7 +623,149 @@
   function tooBigMessage(name, bytes, limit) {
     const mb = (b) => (b / 1048576).toFixed(1);
     return "\u201C" + name + "\u201D is " + mb(bytes) + " MB - the form can send about " + mb(limit) + " MB at a time, so nothing was sent. "
-      + "Take a photo of the receipt instead, or save the PDF smaller, then press Submit again.";
+      + "Email it instead (below) - or take a photo of the receipt, or save the PDF smaller, and press Submit again.";
+  }
+
+  /* t472 - HIS ASK: "I don't like the notification of rejection being on the bottom of the field. Make it an overlay
+     tile saying why it failed and they can x it out to dismiss. And also put 'reply to email with the submission'
+     with text. Make the close or x or dismissible button copy the text pastable automatically. Also say it copied
+     automatically." + "The text pastable can be some sort of legible code the program can pick up on scan."
+     So every rejection is a tile over the form (why it failed, an \u2715). When the FILE can't go through the form (too
+     big, or the send failed), the tile also says: reply to the email that sent you this link, attach the file, paste
+     this text - and the \u2715 copies that text by itself and says so. The text carries a RECEIPT CODE the tracker's
+     mailbox check reads (IIC-XXXX-XXXX-XXXX = the first 12 hex digits of the charge's id - the app's
+     api/_cc-parse.js makes the same code from the charge, tests/cc_reply_test.js proves they agree), so the reply
+     lands on this charge even when someone changes the subject or starts a new email. */
+  function receiptCode(tok) {
+    const t = String(tok || "").trim();
+    let hex = "";
+    if (/^[0-9a-f]{12,}$/i.test(t)) hex = t.toLowerCase();   // the cloud link: the charge id's hex digits
+    else {
+      try {                                                  // the old desktop app's link: the charge id's 16 bytes, base64url
+        let b = t.replace(/-/g, "+").replace(/_/g, "/");
+        while (b.length % 4) b += "=";
+        const bin = atob(b);
+        if (bin.length === 16) for (let i = 0; i < 16; i++) hex += ("0" + bin.charCodeAt(i).toString(16)).slice(-2);
+      } catch (_) { hex = ""; }
+    }
+    if (!/^[0-9a-f]{12}/.test(hex)) return "";
+    const h = hex.slice(0, 12).toUpperCase();
+    return "IIC-" + h.slice(0, 4) + "-" + h.slice(4, 8) + "-" + h.slice(8, 12);
+  }
+  // what the \u2715 copies: one line a person can read, the code the tracker reads, and whatever was already filled in
+  function emailTextFor(f) {
+    const code = receiptCode(token);
+    const lines = [["Receipt for " + (vendor || "this charge"), amount ? formatAmount(amount) : "", date || ""].filter(Boolean).join(" \u00B7 ")];
+    lines.push(code ? "Receipt code: " + code : "Receipt link: " + window.location.href);
+    if (f && f.store) lines.push("Store: " + f.store);
+    if (f && f.category) lines.push("Category: " + f.category);
+    if (f && f.description) lines.push("Description: " + String(f.description).replace(/\s+/g, " ").trim());
+    return lines.join("\n");
+  }
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+    } catch (_) { /* blocked - try the older way */ }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select(); ta.setSelectionRange(0, text.length);
+      const done = document.execCommand("copy");
+      ta.remove();
+      return !!done;
+    } catch (_) { return false; }
+  }
+  function toast(msg) {
+    const old = document.getElementById("toast");
+    if (old) old.remove();
+    const t = document.createElement("div");
+    t.id = "toast"; t.className = "toast"; t.setAttribute("role", "status"); t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 400); }, 4500);
+  }
+  function closeProblem() {
+    const ov = document.getElementById("problem");
+    if (!ov) return;
+    if (ov._onKey) document.removeEventListener("keydown", ov._onKey);
+    ov.remove();
+    document.body.classList.remove("ov-open");
+  }
+  // o: { title, lines: [why it failed], email: the text to paste (only when the file itself couldn't go),
+  //      then: the field to put the cursor in once the tile is closed (a field to fix) }
+  function showProblem(o) {
+    closeProblem();
+    const st = $("status");
+    if (st) st.hidden = true;   // the rejection is the tile now - never a line at the bottom as well
+    const ov = document.createElement("div");
+    ov.className = "ov"; ov.id = "problem";
+    ov.setAttribute("role", "alertdialog"); ov.setAttribute("aria-modal", "true"); ov.setAttribute("aria-labelledby", "ov-title");
+    const card = document.createElement("div");
+    card.className = "ov-card";
+    const x = document.createElement("button");
+    x.type = "button"; x.className = "ov-x"; x.textContent = "\u2715";
+    x.setAttribute("aria-label", o.email ? "Close - copies the text" : "Close");
+    card.appendChild(x);
+    const t = document.createElement("div");
+    t.className = "ov-title"; t.id = "ov-title"; t.textContent = o.title || "That didn\u2019t go through";
+    card.appendChild(t);
+    (o.lines || []).filter(Boolean).forEach((line) => {
+      const p = document.createElement("p");
+      p.className = "ov-line"; p.textContent = line;
+      card.appendChild(p);
+    });
+    let codeEl = null, hint = null;
+    if (o.email) {
+      const box = document.createElement("div");
+      box.className = "ov-email";
+      const h = document.createElement("div");
+      h.className = "ov-email-head"; h.textContent = "Send it by email instead";
+      box.appendChild(h);
+      const ol = document.createElement("ol");
+      ol.className = "ov-steps";
+      ["Reply to the email that sent you this link",
+       "Attach the receipt file",
+       "Paste the text below into your reply - its receipt code tells the tracker which charge it\u2019s for"].forEach((s) => {
+        const li = document.createElement("li"); li.textContent = s; ol.appendChild(li);
+      });
+      box.appendChild(ol);
+      codeEl = document.createElement("pre");
+      codeEl.className = "ov-code"; codeEl.textContent = o.email;
+      box.appendChild(codeEl);
+      hint = document.createElement("div");
+      hint.className = "ov-hint";
+      hint.textContent = "Closing this box copies the text for you automatically - then just paste it into your reply.";
+      box.appendChild(hint);
+      card.appendChild(box);
+    }
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "primary ov-btn";
+    btn.textContent = o.email ? "Copy the text & close" : "OK";
+    card.appendChild(btn);
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+    document.body.classList.add("ov-open");
+    let refused = 0;
+    const dismiss = async () => {
+      if (!o.email) { closeProblem(); if (o.then && o.then.focus) { try { o.then.focus(); } catch (_) {} } return; }
+      const done = await copyText(o.email);
+      if (!done && refused++ === 0) {
+        // the browser wouldn't let the page copy: keep the tile, select the text, say how - the next close closes
+        try { const rg = document.createRange(); rg.selectNodeContents(codeEl); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rg); } catch (_) {}
+        hint.textContent = "Your browser didn\u2019t let the page copy it - press and hold the text above, choose Copy, then close this.";
+        hint.classList.add("warn");
+        return;
+      }
+      closeProblem();
+      toast(done ? "\u2713 Copied automatically - paste it into your reply email" : "Not copied - open this again with Submit to copy the text");
+    };
+    x.addEventListener("click", dismiss);
+    btn.addEventListener("click", dismiss);
+    ov._onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); dismiss(); } };
+    document.addEventListener("keydown", ov._onKey);
+    setTimeout(() => { try { btn.focus(); } catch (_) {} }, 30);
+    window.__PROBLEM = { title: t.textContent, email: o.email || "" };   // a test page reads what the tile says
   }
   function failMessage(status, data, statusText, somethingWent) {
     const tail = somethingWent ? " Press Submit again - only what didn't go is sent." : " Nothing was sent - press Submit again.";
@@ -684,13 +826,13 @@
       : (lockedStores ? "" : typedStore);
     const description = $("description").value.trim();
     if (lockedStores && !chosenStores.length && typedStore) {
-      setStatus("Pick your store from the list — a typed name can't be used here.", "error");
+      setStatus("Pick your store from the list — a typed name can't be used here.", "error", $("store"));
       return;
     }
     if (REQUIRED.store && !store) {
       setStatus(lockedStores
         ? "Please pick your store from the list."
-        : "Please choose which store (or company) this charge is for.", "error");
+        : "Please choose which store (or company) this charge is for.", "error", $("store"));
       return;
     }
     /* t424 - the category is LOCKED to the admin's list: only a label from it is ever sent
@@ -707,18 +849,16 @@
       const match = findCategory(typedCat, catOpts);
       category = (picked && normCat(picked) === normCat(typedCat)) ? picked : (match ? match.label : "");
       if (typedCat && !category) {
-        setStatus("Pick a category from the list.", "error");
-        if (catEl) catEl.focus();
+        setStatus("Pick a category from the list.", "error", catEl);
         return;
       }
     }
     if (REQUIRED.category && !category) {
-      setStatus("Category is required.", "error");
-      if (catEl) catEl.focus();
+      setStatus("Category is required.", "error", catEl);
       return;
     }
     if (REQUIRED.description && !description) {
-      setStatus("Please add a short description - accounting needs it to book the charge.", "error");
+      setStatus("Please add a short description - accounting needs it to book the charge.", "error", $("description"));
       return;
     }
     // what the chosen option is LINKED TO: a specific store, or a whole company
@@ -767,8 +907,11 @@
     for (const f of files) ready.push({ orig: f, file: await shrinkPhoto(f) });
     const todo = ready.filter((x) => !SENT_FILES.has(fileKey(x.orig)));   // a retry sends only what didn't go
     const big = todo.find((x) => x.file.size > SEND_LIMIT);
+    // t472 - the file can't go through the form, so the tile hands over the email route with the receipt code
+    const byEmail = () => emailTextFor({ store, category, description });
     if (big) {
-      setStatus(tooBigMessage(big.orig.name || big.file.name || "That file", big.file.size, SEND_LIMIT), "error");
+      showProblem({ title: "This file is too big for the form",
+                    lines: [tooBigMessage(big.orig.name || big.file.name || "That file", big.file.size, SEND_LIMIT)], email: byEmail() });
       disableForm(false);
       return;
     }
@@ -783,13 +926,17 @@
         res = await fetch("/api/submit", { method: "POST", body: fd });
         data = await res.json().catch(() => ({}));
       } catch (err) {
-        setStatus(partSaid(sentParts, parts.length, sentFiles) + "Couldn't reach the form's server (" + ((err && err.message) || err) + ")."
-          + (sentParts ? " Press Submit again - only what didn't go is sent." : " Nothing was sent - check the connection and press Submit again."), "error");
+        showProblem({ title: sentParts ? "Part of your receipt didn\u2019t go through" : "Your receipt didn\u2019t go through",
+          lines: [partSaid(sentParts, parts.length, sentFiles) + "Couldn't reach the form's server (" + ((err && err.message) || err) + ")."
+            + (sentParts ? " Press Submit again - only what didn't go is sent." : " Nothing was sent - check the connection and press Submit again.")],
+          email: byEmail() });
         disableForm(false);
         return;
       }
       if (!res.ok) {
-        setStatus(partSaid(sentParts, parts.length, sentFiles) + failMessage(res.status, data, res.statusText, sentParts > 0), "error");
+        showProblem({ title: sentParts ? "Part of your receipt didn\u2019t go through" : "Your receipt didn\u2019t go through",
+          lines: [partSaid(sentParts, parts.length, sentFiles) + failMessage(res.status, data, res.statusText, sentParts > 0)],
+          email: byEmail() });
         disableForm(false);
         return;
       }
@@ -821,7 +968,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setStatus("Couldn't mark it: " + (data.error || ("error " + res.status + (res.statusText ? " " + res.statusText : ""))) + " - nothing was changed. Try again.", "error");   // t471 - never a blank reason
+        showProblem({ title: "Couldn\u2019t mark it", lines: [(data.error || ("error " + res.status + (res.statusText ? " " + res.statusText : ""))) + " - nothing was changed. Try again."] });   // t471 - never a blank reason; t472 - a tile
         disableForm(false);
         return;
       }
@@ -835,7 +982,7 @@
         showDone("Marked as a temporary hold", "Thanks. No receipt is needed for this charge.");
       }
     } catch (err) {
-      setStatus(`Network error: ${err.message || err}`, "error");
+      showProblem({ title: "Couldn\u2019t mark it", lines: ["Couldn't reach the form's server (" + (err.message || err) + ") - nothing was changed. Try again."] });   // t472 - a tile
       disableForm(false);
     }
   }
@@ -855,7 +1002,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setStatus("Report failed: " + (data.error || ("error " + res.status + (res.statusText ? " " + res.statusText : ""))) + " - nothing was sent. Try again.", "error");   // t471 - never a blank reason
+        showProblem({ title: "The report didn\u2019t go through", lines: [(data.error || ("error " + res.status + (res.statusText ? " " + res.statusText : ""))) + " - nothing was sent. Try again."] });   // t471 - never a blank reason; t472 - a tile
         disableForm(false);
         return;
       }
@@ -866,12 +1013,16 @@
       try { localStorage.setItem(FRAUD_KEY, new Date().toISOString()); } catch (_) {}
       showDone("Report received", "Thanks. The accounting team has been notified.");
     } catch (err) {
-      setStatus(`Network error: ${err.message || err}`, "error");
+      showProblem({ title: "The report didn\u2019t go through", lines: ["Couldn't reach the form's server (" + (err.message || err) + ") - nothing was sent. Try again."] });   // t472 - a tile
       disableForm(false);
     }
   }
 
-  function setStatus(msg, kind) {
+  function setStatus(msg, kind, field) {
+    /* t472 - a REJECTION is never a line at the bottom any more (his "I don't like the notification of rejection being
+       on the bottom of the field"): every error is the tile over the form, with its ✕. Progress ("Submitting…",
+       "Sending part 2 of 3…") stays the quiet line under the buttons. */
+    if (kind === "error") { showProblem({ title: "Can\u2019t submit yet", lines: [msg], then: field }); return; }
     const el = $("status");
     el.textContent = msg;
     el.className = "status " + (kind || "");
