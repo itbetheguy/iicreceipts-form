@@ -128,7 +128,8 @@ It is a **locked search box**: typing ranks the admin's list closest-first (whol
 ranking is the app's `api/_cc-category.js` copied verbatim into `upload.js`, so both sides agree),
 arrows move the highlight, Enter or a click picks, and only a label from the list is ever
 submitted (a typed non-label is refused with *"Pick a category from the list."*). Empty and
-focused, it shows the whole list, so it is a plain dropdown too. Required whenever the endpoint
+focused, it shows the whole list **A to Z** (t500 - his "want categories by alphabetical order"; equally close matches
+are A to Z too - the app's `catAlpha`, copied verbatim), so it is a plain dropdown too. Required whenever the endpoint
 hands over a list, unless the admin unticks it.
 
 **Never-go-down rule, again:** with no list (endpoint down, or nothing configured yet) it is a

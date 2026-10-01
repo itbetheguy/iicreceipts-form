@@ -233,13 +233,16 @@
      form must rank a query identically, so nothing here is ever "improved" on its own. Scores,
      best first: whole label (100) > label starts with it (90) > a word starts with it (80) >
      appears anywhere (70) > every typed word appears (60) > the letters appear in order (50) >
-     one typo off a word (40) > two typos (30). Ties: shorter label, then the admin's order. */
+     one typo off a word (40) > two typos (30). t500 - ties A to Z, and an empty box lists the whole list A to Z (his
+     "want categories by alphabetical order"): catAlpha / sortCategories are the app's own. */
   function normCat(s){return String(s==null?"":s).toLowerCase().replace(/&/g," and ").replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ").trim();}
   function isSubsequence(q,s){let i=0;for(let j=0;j<s.length&&i<q.length;j++)if(s[j]===q[i])i++;return i===q.length;}
   function levDist(a,b,cap){const la=a.length,lb=b.length,max=(cap==null?2:cap)+1;if(Math.abs(la-lb)>cap)return max;let prev=new Array(lb+1),cur=new Array(lb+1);for(let j=0;j<=lb;j++)prev[j]=j;for(let i=1;i<=la;i++){cur[0]=i;let rowMin=cur[0];for(let j=1;j<=lb;j++){cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));if(cur[j]<rowMin)rowMin=cur[j];}if(rowMin>cap)return max;const t=prev;prev=cur;cur=t;}return Math.min(prev[lb],max);}
   function wordDist(q,w,cap){const whole=levDist(q,w,cap);const head=w.length>q.length?levDist(q,w.slice(0,q.length),cap):whole;return Math.min(whole,head);}
   function scoreOne(qn,label){const ln=normCat(label);if(!qn||!ln)return 0;if(ln===qn)return 100;if(ln.indexOf(qn)===0)return 90;const words=ln.split(" ");if(words.some(w=>w.indexOf(qn)===0))return 80;if(ln.indexOf(qn)>=0)return 70;const qws=qn.split(" ").filter(Boolean);if(qws.length>1&&qws.every(w=>ln.indexOf(w)>=0))return 60;const q1=qn.replace(/ /g,"");if(q1.length>=5&&words.some(w=>w[0]===q1[0])&&isSubsequence(q1,ln.replace(/ /g,"")))return 50;if(q1.length>=4&&words.some(w=>w.length>=4&&wordDist(q1,w,1)<=1))return 40;if(q1.length>=5&&words.some(w=>w.length>=5&&wordDist(q1,w,2)<=2))return 30;return 0;}
-  function rankCategories(query,options){const qn=normCat(query);const list=(Array.isArray(options)?options:[]).filter(o=>o&&String(o.label||"").trim());if(!qn)return list.map((o,i)=>({option:o,score:0,i}));return list.map((o,i)=>({option:o,score:scoreOne(qn,o.label),i})).filter(x=>x.score>0).sort((a,b)=>(b.score-a.score)||(String(a.option.label).length-String(b.option.label).length)||(a.i-b.i));}
+  function catAlpha(a,b){const la=String(a==null?"":a),lb=String(b==null?"":b);return normCat(la).localeCompare(normCat(lb),"en",{numeric:true})||(la<lb?-1:la>lb?1:0);}
+  function sortCategories(options){return(Array.isArray(options)?options:[]).slice().sort((x,y)=>catAlpha(x&&x.label,y&&y.label));}
+  function rankCategories(query,options){const qn=normCat(query);const list=(Array.isArray(options)?options:[]).filter(o=>o&&String(o.label||"").trim());if(!qn)return sortCategories(list).map((o,i)=>({option:o,score:0,i}));return list.map((o,i)=>({option:o,score:scoreOne(qn,o.label),i})).filter(x=>x.score>0).sort((a,b)=>(b.score-a.score)||catAlpha(a.option.label,b.option.label));}
   function findCategory(label,options){const n=normCat(label);if(!n)return null;return(Array.isArray(options)?options:[]).find(o=>o&&normCat(o.label)===n)||null;}
   window.__CAT_RANK = rankCategories;   // a test page can drive the ranking directly
   window.__CAT_OPTS = [];               // the list the endpoint handed over (empty = plain box)
