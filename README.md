@@ -116,6 +116,17 @@ across them** by the app. The submission carries both shapes at once — `stores
 **If the options endpoint fails for any reason, the field falls back to the plain text box and the
 form still submits.** Never let a decoration break the submission — that is the uptime rule.
 
+## Every pick ADDS a file; every file has an ✕ (t501)
+
+His words: *"i uploaded one file then i tried to upload another two and it removed my first?? why?? i should also be
+able to see an x next to my uploads to remove them."* A file box replaces its whole selection every time it is used -
+a second pick dropped the first, and on a phone each new photo taken wiped the one before. `upload.js` keeps the form's
+OWN list (`PICKED`): every pick adds to it (the same file picked twice is listed once), every file on the list has an
+✕ that takes it off, the file box is set back to the whole list after each pick or ✕ (so it reads "3 files"), and
+Submit sends `PICKED`. Up to 20 files (the server's `MAX_FILES` per send); a pick past that is refused in a tile that
+says how many weren't added. An older browser without `DataTransfer` gets an emptied box - the list below is what goes.
+Pinned by the app repo's `tests/cc_waiting_test.js` section 7.
+
 ## The category field (t424)
 
 His words: *"I need the form to have a field called category. i will give you a list of items that

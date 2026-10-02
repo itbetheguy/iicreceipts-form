@@ -554,17 +554,60 @@
     if (submitBtn) submitBtn.textContent = "Submit update";
   }
 
-  filesInput.addEventListener("change", renderFileList);
+  /* t501 - HIS "i uploaded one file then i tried to upload another two and it removed my first?? why?? i should also be able
+     to see an x next to my uploads to remove them". A file box REPLACES its whole selection every time it is used - so a
+     second pick dropped the first, and on a phone every new photo taken wiped the one before. The form keeps its OWN list
+     now (PICKED): every pick ADDS to it (the same file picked twice is listed once), every file has an ✕ that takes it off,
+     and Submit sends this list. The box is set back to the whole list after each pick or ✕, so it reads "3 files", never
+     just the last pick (an older browser that can't do that shows an empty box - the list below is what goes). */
+  const PICKED = [];
+  const MAX_FILES = 20;                               // the form server takes 20 per send (api/submit.js MAX_FILES)
+  function addPicked(list) {
+    let over = 0;
+    Array.from(list || []).forEach((f) => {
+      if (!f || PICKED.some((g) => fileKey(g) === fileKey(f))) return;   // already on the list
+      if (PICKED.length >= MAX_FILES) { over++; return; }
+      PICKED.push(f);
+    });
+    return over;
+  }
+  function syncFilesInput() {
+    try {
+      const dt = new DataTransfer();
+      PICKED.forEach((f) => dt.items.add(f));
+      filesInput.files = dt.files;
+    } catch (_) { try { filesInput.value = ""; } catch (__) {} }
+  }
+  filesInput.addEventListener("change", () => {
+    const over = addPicked(filesInput.files);
+    syncFilesInput();
+    renderFileList();
+    if (over) showProblem({ title: "Up to " + MAX_FILES + " files",
+      lines: [over + (over === 1 ? " file wasn't" : " files weren't") + " added - take one off with its \u2715 to make room."] });
+  });
 
   function renderFileList() {
     fileList.innerHTML = "";
-    const files = Array.from(filesInput.files || []);
-    if (files.length === 0) return;
-    files.forEach((f) => {
+    PICKED.forEach((f) => {
       const row = document.createElement("div");
       row.className = "file-item";
-      const size = (f.size / 1024 / 1024).toFixed(2);
-      row.textContent = `${f.name} — ${size} MB`;
+      const name = document.createElement("span");
+      name.className = "file-name";
+      name.textContent = `${f.name} — ${(f.size / 1024 / 1024).toFixed(2)} MB`;
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "file-x";
+      x.textContent = "\u2715";
+      x.title = "Take this file off";
+      x.setAttribute("aria-label", "Remove " + f.name);
+      x.addEventListener("click", () => {
+        const i = PICKED.indexOf(f);
+        if (i >= 0) PICKED.splice(i, 1);
+        syncFilesInput();
+        renderFileList();
+      });
+      row.appendChild(name);
+      row.appendChild(x);
       fileList.appendChild(row);
     });
   }
@@ -830,7 +873,7 @@
   }
 
   async function submitReceipt(_unused) {
-    const files = Array.from(filesInput.files || []);
+    const files = PICKED.slice();   // t501 - the form's own list: every pick adds, an ✕ takes one off
     // First-time submission: at least one file is required. Update
     // mode skips the check — store/description edits without a new
     // photo are valid and useful (correcting the wrong store, etc.).
