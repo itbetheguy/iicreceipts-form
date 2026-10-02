@@ -221,13 +221,11 @@
       if (e.key === "Backspace" && !input.value && chosen.length) { chosen.pop(); drawChips(); renderPanel(); }
     });
     input.addEventListener("blur", () => setTimeout(() => { panel.style.display = "none"; }, 150));
-    if (cfg.store_hint) {
-      const hint = document.createElement("div");
-      hint.className = "opt";
-      hint.style.marginTop = "4px";
-      hint.textContent = cfg.store_hint;
-      input.insertAdjacentElement("afterend", hint);
-    }
+    /* t512 - his "why is the suggestion so far below the field?": the hint used to go in right after the INPUT, i.e.
+       INSIDE the combobox box, and the list opens under the bottom of that box - so it opened under two lines of small
+       print instead of under the field. The hint goes under the whole box now (the Category box's always has), so the
+       list opens right under the field and lies over the hint while it is open. */
+    if (cfg.store_hint) hintUnder(wrap, cfg.store_hint);
   }
   /* t424 - THE RANKING. This is the app's api/_cc-category.js, copied VERBATIM: the app and the
      form must rank a query identically, so nothing here is ever "improved" on its own. Scores,

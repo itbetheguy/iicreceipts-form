@@ -116,6 +116,16 @@ across them** by the app. The submission carries both shapes at once — `stores
 **If the options endpoint fails for any reason, the field falls back to the plain text box and the
 form still submits.** Never let a decoration break the submission — that is the uptime rule.
 
+## The store suggestions open right under the field (t512)
+
+His words, with a screenshot of "sma" typed in Store / location: *"why is the suggestion so far below the fiedl?"* The
+store hint ("If the charge isn't for anything restaurant related, choose ...") was inserted right after the INPUT - inside
+the combobox box (`.cc-combo`) - and the suggestion list opens under the bottom of that box (`top: calc(100% + 4px)`), so
+it opened under two lines of small print: 56px below the field on a computer, 80px on a phone, covering the top of the
+Category box. The hint now goes under the whole box (`hintUnder(wrap, ...)`, the way the Category box's hint always has):
+the list opens 4px under the field and lies over the hint while it is open; with the list closed nothing on the page
+moved. Proven on the real form served from disk with the live options list (`scratchpad/form512.py`, before = t501).
+
 ## Every pick ADDS a file; every file has an ✕ (t501)
 
 His words: *"i uploaded one file then i tried to upload another two and it removed my first?? why?? i should also be
