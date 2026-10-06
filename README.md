@@ -1,3 +1,9 @@
+<!-- t537 - an UPDATE can be submitted again. upload.js sends `update=1` whenever the form is in update mode (a
+     receipt is already on file), and api/submit.js skips its require_store / require_description / require_category
+     backstop for one - checking the claim against cc-submission-status and recording the verdict in the email as
+     `update_confirmed`. RULE: this form's rules live in TWO places. A rule relaxed in upload.js must be relaxed in
+     api/submit.js in the same build, or the server refuses what the form just offered (his "?? cant submit updates?"). -->
+
 # The receipts form — the public half of the credit-card tracker
 
 **This is a SEPARATE repo and a SEPARATE Vercel project** (`iicreceipts-form` →
