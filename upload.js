@@ -968,6 +968,11 @@
          app build that doesn't know `category` yet still books the submission unchanged. */
       fd.append("category", category);
       fd.append("description", description);
+      /* t537 - his "?? cant submit updates?": every field is optional once a receipt is on file (t473/t474),
+         but that rule lived ONLY here - the server's own require_* backstop knew nothing about it and threw
+         a real update back with "Please choose which store (or company) this charge is for." It is told now,
+         and it checks the claim against the tracker itself before deciding what to insist on. */
+      if (isUpdateMode) fd.append("update", "1");
       return fd;
     };
 

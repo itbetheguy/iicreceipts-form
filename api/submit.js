@@ -71,6 +71,12 @@ module.exports = async function handler(req, res) {
     }
 
     const fraud = !!f.fraud;
+    /* t537 - HIS BUG ("?? cant submit updates?"): t473/t474 made every field optional once a receipt is on
+       file (his "when a submission is already there, i dont need any of the fields required") - on the CLIENT
+       alone. This backstop never heard about it, so the form let him press Submit update with the store box
+       empty and the server threw the whole thing back. A dead end: the only way out was to re-answer a
+       question the tracker already had the answer to. */
+    const claimsUpdate = String(f.update || "") === "1";
     const meta = {
       token,
       cardholder:  f.cardholder  || "",
@@ -121,7 +127,16 @@ module.exports = async function handler(req, res) {
        got hard-rejected with no email sent - the exact "form goes down" outcome the never-go-down
        rule forbids. When reqs is null we skip enforcement (the submission still emails and the sweep
        reconciles; the store can be corrected later); we only enforce a requirement we could confirm. */
-    if (!fraud && !f.temp_charge) {
+    /* t537 - and it is CHECKED, against the same cc-submission-status the form itself reads: does the tracker
+       really hold a receipt for this charge? The answer rides in the email either way (true / false / null when
+       the tracker couldn't be asked), so an update that nothing confirms is visible rather than silent.
+       An unconfirmed claim still goes through: a missing store is a gap the app already chases on the Assign
+       view, while refusing a real update is the "the form goes down" outcome the never-go-down rule forbids. */
+    if (claimsUpdate) {
+      meta.update = true;
+      meta.update_confirmed = await receiptsOnFile(token);
+    }
+    if (!fraud && !f.temp_charge && !claimsUpdate) {
       const reqs = await fetchRequirements();
       if (reqs) {
         if (reqs.require_store && !String(f.store || "").trim())
@@ -240,6 +255,21 @@ async function fetchRequirements() {
       return { require_store: !!j.require_store, require_description: !!j.require_description,
         require_category: hasCats && j.require_category !== false };
     }
+  } catch (_) {}
+  return null;
+}
+
+/* t537 - does the tracker already hold a receipt for this charge? true / false / null (couldn't ask).
+   The SAME public endpoint the form reads to decide update mode, so the two can't disagree about the facts. */
+async function receiptsOnFile(token) {
+  try {
+    const url = process.env.CC_STATUS_URL || "https://iicorp-ip.vercel.app/api/cc-submission-status";
+    const ctl = new AbortController();
+    const tm = setTimeout(() => ctl.abort(), 6000);
+    const r = await fetch(url + "?token=" + encodeURIComponent(token), { signal: ctl.signal });
+    clearTimeout(tm);
+    const j = await r.json();
+    if (j && j.ok === true && Array.isArray(j.files)) return j.files.length > 0;
   } catch (_) {}
   return null;
 }
