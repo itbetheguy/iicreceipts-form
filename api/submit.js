@@ -22,7 +22,12 @@ const MAX_FILES = 20;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;   // 25MB per file
 const MAX_TOTAL_BYTES = 24 * 1024 * 1024;  // ~24MB total (Gmail SMTP cap)
 
+// cloud562 (main app) - THE CREDIT-CARD RECEIPTS ARE OFF. His "and yes the server should be off": this form takes no more
+// submissions - unless the env var RECEIPTS_FORM_ON=1 (read on every call; the main app's api/_cc-off.js has the same
+// switch, CC_SERVER_ON, for its side).
+
 module.exports = async function handler(req, res) {
+  if (process.env.RECEIPTS_FORM_ON !== "1") return res.status(503).json({ error: "Credit card receipts are turned off." });
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "method not allowed" });
